@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Bob's Big Busy Day</title>
+<style>html,body{margin:0;background:#111;display:flex;justify-content:center;align-items:center;height:100%}</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>
+</head>
+<body>
+<script>
+const T = 32;
+const FONT = 'Comic Sans MS, cursive';
+const D = Phaser.Math.Distance.Between;
+
+/* ============================================================
+   PACING  -  7 days.
+   Days 1-2 cute | Days 3-5 MILD scary | Days 6-7 VERY scary
+   ============================================================ */
+const LEVELS = [0, 0.04, 0.12, 0.22, 0.34, 0.50, 0.66, 0.78, 0.90, 1.0];   // base corruption per day
+const DRAIN  = [0, 0, 0.18, 0.28, 0.38, 0.55, 0.72, 0.88, 1.05, 1.25];    // sanity lost per second
+
+/* ============================================================
+   TASKS
+   ============================================================ */
+const K = (id,icon,text,trigger,corruptText)=>({id,icon,text,trigger,corruptText});
+const EAT = K('eat','🍳','Make Breakfast','kitchen');
+const DAYS = {
+  1: [EAT, K('mail','✉️',"Mail Bob's Letter",'mailbox'), K('water','🌻','Water the Sunflowers','flowers'),
+      K('duck','🦆','Feed the Ducks','pond'), K('mayor','🎩','Say Hello to Mayor Barnaby','mayor')],
+  2: [EAT, K('board','📋','Read the Notice Board','board'), K('mail','✉️',"Mail Bob's Letter",'mailbox'),
+      K('water','🌻','Water the Sunflowers','flowers'), K('lib','📚','Return a Library Book','shelf'),
+      K('mayor','🎩','Say Hello to Mayor Barnaby','mayor')],
+  3: [EAT, K('apple','🍎','Pick an Apple','basket','Pick an Apple (only some are good)'), K('desk','📖','Check Out a Book','desk'),
+      K('scare','🧹','Fix the Scarecrow','scarecrow'), K('well','🪣','Fetch Water','well'),
+      K('mayor','🎩','Say Hello to Mayor Barnaby','mayor')],
+  4: [EAT, K('board','📋','Read the Notice Board','board'), K('duck','🦆','Feed the Ducks','pond'),
+      K('mail','✉️','Find the Missing Letter','mailbox'), K('water','🌻','Water the Sunflowers','flowers'),
+      K('mayor','🎩','Say Hello to Mayor Barnaby','mayor',"Don't let him notice you.")],
+  5: [EAT, K('scare','🧹','Fix the Scarecrow','scarecrow'), K('lib','📚','Return a Library Book','shelf'),
+      K('well','🪣','Fetch Water','well'), K('mail','✉️',"Mail Bob's Letter",'mailbox'),
+      K('mayor','🎩','Say Hello to Mayor Barnaby','mayor','He is smiling wider.')],
+  6: [K('eat','🍳','Eat Something (if you can)','kitchen','Eat. Eat. EAT.'), K('board','📋','Tear Down the Notices','board',"Don't read them."),
+      K('water','🌻','Drain the Sunflowers','flowers','D̷r̸a̵i̶n̷ ̸i̴t̷'), K('lib','📚','Barricade the Library','shelf','▓▒░ ▒░▓▓░'),
+      K('mayor','🎩','Face Mayor Barnaby','mayor','HE IS WAITING.')],
+  7: [K('mail','✉️','Take the Letter Back','mailbox','GO TO BED'), K('water','🌻','Dig Under the Sunflowers','flowers','THEY ARE UNDER HERE'),
+      K('duck','🦆','Drain the Pond','pond','IT ISN\'T WATER'), K('desk','📖','Burn the Library Card','desk','░░░░░░'),
+      K('mayor','🎩','End It With Barnaby','mayor','RUN.')],
+  8: [K('market','🥖','Buy a Loaf at the Market','marketStallA','The stall is open. Too open.'), K('river','🌊','Listen to the Riverside','river','The river is saying your name.'),
+      K('bridge','🌉','Cross the Old Bridge','bridge','Do not look down.'), K('orchard','🍎','Pick the Red Apple','orchardTrees','It is still warm.'), K('mayor','🎩','Ask Barnaby About the Mill','mayor','He already knows.')],
+  9: [K('mill','⚙️','Inspect the Mill Wheel','millWheel','It is turning by itself.'), K('creek','💧','Follow the Creek','millCreek','The water runs backwards.'),
+      K('path','🥾','Follow the Orchard Path','orchardPath','Something followed you here.'), K('fountain','⛲','Check the Market Fountain','marketFountain','There is no reflection.'), K('mayor','🎩','Find Barnaby','mayor','He is everywhere.')],
+  10:[K('market','🛒','Search the Empty Market','marketStallB','Nothing is being sold anymore.'), K('river','🌊','Cross the Riverside','river','The river has stopped.'),
+      K('mill','⚙️','Stop the Mill','millWheel','STOP IT BEFORE IT SEES YOU.'), K('orchard','🍎','Reach the End of the Path','orchardPath','KEEP RUNNING.'), K('mayor','🎩','Confront Barnaby','mayor','RUN.')],
+};
+
+/* ============================================================
+   DIALOGUE + VOICES  (all the story text lives here)
+   ============================================================ */
+const M=(text,x={})=>({who:'Mayor Barnaby',text,...x}), B=text=>({who:'Bob',text});
+const MAYOR_TALK = {
+  1:[M('Well hello there, Bob! What a lovely, lovely morning!'),B('Good morning, Mayor Barnaby!'),
+     M('Have you watered the sunflowers yet?',{ask:['Not yet!','Almost done!'],then:[[M("No rush! They'll wait for you. They always do.")],[M("Splendid! You're the best neighbor a town could ask for!")]]}),
+     M('Now off you go! Busy, busy, busy!')],
+  2:[M('Morning, Bob! Sleep well?',{ask:['Great!','I heard noises...'],then:[[M('Wonderful! Sleep is very important.')],[M("Noises? Ha ha! Just the town settling. Nothing to worry about.")]]}),
+     B('Where is everybody today?'),M("Everybody? ...Ha ha! Silly Bob. It's just you and me. It's always been just you and me."),M('Busy, busy, busy!')],
+  3:[M("Bob! You're up early. ...Or late? Time is funny like that."),B('Are you feeling okay, Mayor?'),
+     M('Splendid! Have an apple from the field. Only some of them are good.',{ask:['Which ones?','No thanks.'],then:[[M("That's the fun part, Bob. You never know until you bite.")],[M("Manners, Bob. You'll take one eventually.")]]}),
+     M("And do be nice to the scarecrow. He doesn't like being ignored.")],
+  4:[M("You're doing so well, Bob. So obedient! I mean... helpful. Helpful."),B('Did you say obedient?'),M('Did I? Ha. Ha. Ha.'),
+     M('Every night I stand outside your window. Just to make sure you are safe.'),B('...Every night?'),M('Smile, Bob. You stopped smiling. It is very rude.')],
+  5:[M('Oh, Bob. Your letters were never delivered. Not once.'),B('Then who have I been mailing them to?'),M('Me. They were all for me. I was so hungry for them.'),
+     M("We don't leave, Bob. Nobody leaves. The town needs its Bob."),B('Your smile... it is too wide.'),M("Tomorrow, it will be wider.")],
+  6:[M('Bob... you look tired. Sit. Stay. Close your eyes.'),B("Mayor Barnaby, what's wrong with your face?"),
+     M("Nothing's wrong with my face. It's just... coming off.",{fx:'monster'}),
+     M("I'VE BEEN SO HUNGRY, BOB. THE SUNFLOWERS WERE ONLY FLOWERS. YOU ARE MEAT."),B('...Run.')],
+  7:[M('YOU CAME BACK. GOOD. THE TOWN FEEDS ON GOOD LITTLE BOBS.'),B('Every morning. I keep coming back.'),
+     M('SEVEN DAYS. SEVEN HUNDRED. I STOPPED COUNTING.'),B("Then I'll end it. All of it."),M('TRY.')],
+};
+const BOARD = [
+  'NOTICE: Town picnic on Saturday! Bring a sunflower! — Mayor B.',
+  'NOTICE: Please stop asking where everyone went. — Mayor B.',
+  'NOTICE: THERE IS NO SATURDAY. THERE IS NO EXIT. THERE IS ONLY BOB.',
+];
+const VOICE_MILD = ['Did you hear that?','Someone is standing behind you.','The apples are watching.','Why is it so quiet, Bob?',
+  "That wasn't the wind.","You've done this before.","Don't look at the scarecrow.",'Smile, Bob. Smile.','He knows your name.','Nobody else lives here.'];
+const VOICE_SEVERE = ['IT IS INSIDE THE WALLS.','You were never supposed to wake up.','Barnaby is hungry.','The town eats its Bobs.',
+  'They buried the others under the sunflowers.','We can hear you thinking.','Your face is not yours anymore.','Scream. No one is left to hear.',
+  'BEHIND YOU. BEHIND YOU.','Bob. Bob. Bob. Bob. Bob.','The sun is a lie.','Take the pill. Take the pill. It will not help.',
+  'Every morning you wake up a little less.','The house remembers where you sleep.'];
+
+const ACTIONS = {   // animation played while Bob does each task
+  mailbox:{e:'✉️',ms:900,kind:'throw'}, shelf:{e:'📕',ms:1100,kind:'throw'}, desk:{e:'📖',ms:1100,kind:'throw'}, basket:{e:'🍎',ms:700,kind:'throw'},
+  flowers:{e:'💧',ms:1500,kind:'rain'}, pond:{e:'🍞',ms:1300,kind:'scatter'}, kitchen:{e:'♨️',ms:1500,kind:'rise'},
+  well:{e:'💦',ms:1300,kind:'rise'}, scarecrow:{e:'🧹',ms:1400,kind:'sweep'},
+};
+
+/* ============================================================
+   ROOMS  (tiles; props/triggers anchored bottom-centre)
+   ============================================================ */
+const border=(w,h,floor,edge,gate)=>(x,y)=>(x===0||y===0||x===w-1||y===h-1)&&!(gate&&gate(x,y))?edge:floor;
+const trees=pts=>pts.map(([x,y])=>({k:'tree',x,y,sway:true,b:[16,10]}));
+const ROOMS = {
+  town:{ name:"Bob's Town", w:25,h:19, bg:'#87ceeb',
+    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===24&&y===9)(x,y)===2?2:(y===9||((x===5||x===19)&&y>=5&&y<=9))?1:0,
+    props:[{k:'house',x:5.5,y:5,b:[160,120]},{k:'library',x:19.5,y:5,b:[160,120]},
+           ...trees([[2,8],[9,3],[12,4],[14,3],[22,8],[2,14],[9,16],[16,15],[22,16],[13,14]])],
+    triggers:[
+      {id:'mailbox',label:'Mailbox',k:'mailbox',type:'task',x:8.5,y:8.6,icon:'✉️',b:[10,8]},
+      {id:'well',label:'Well',k:'well',type:'task',x:11.5,y:7.4,icon:'🪣',b:[40,16]},
+      {id:'board',label:'Notice Board',k:'board',type:'task',x:15.5,y:8.6,icon:'📋',b:[40,10]},
+      {id:'enterHouse',label:"Enter Bob's House",type:'door',x:5.5,y:5.7,icon:'🏠',ih:60,to:'house',spawn:[7,7.2]},
+      {id:'enterLib',label:'Enter Library',type:'door',x:19.5,y:5.7,icon:'📚',ih:60,to:'library',spawn:[8,8.2]},
+      {id:'mayor',label:'Mayor Barnaby',npc:true,type:'task',x:14,y:12.5,icon:'🎩',ih:62},
+      {id:'toField',label:'The Field',type:'door',auto:true,x:24.2,y:9.9,to:'field',spawn:[2.2,9.9]},
+      {id:'toMarket',label:'Market Square',type:'door',x:10.5,y:16.8,icon:'🛒',ih:42,to:'market',spawn:[2,10]},
+    ]},
+  field:{ name:'The Sunflower Field', w:25,h:19, bg:'#87ceeb',
+    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===0&&y===9)(x,y)===2?2:(y===9&&x<10)?1:0,
+    props:[...trees([[3,3],[9,3],[12,2],[20,3],[23,5],[3,16],[8,17],[20,16],[23,13],[12,16]]),
+           {k:'pond',x:5.5,y:7,b:[84,22]},
+           {k:'sunflower',x:14.6,y:9.2,sway:true,sf:1},{k:'sunflower',x:16,y:8.8,sway:true,sf:1},
+           {k:'sunflower',x:17.4,y:9.2,sway:true,sf:1},{k:'sunflower',x:15.3,y:10.4,sway:true,sf:1},{k:'sunflower',x:16.7,y:10.4,sway:true,sf:1}],
+    triggers:[
+      {id:'toTown',label:'Back to Town',type:'door',auto:true,x:0.3,y:9.9,to:'town',spawn:[22.6,9.9]},
+      {id:'flowers',label:'Sunflowers',type:'task',x:16,y:11.6,icon:'🌻',ih:20},
+      {id:'pond',label:'Duck Pond',type:'task',x:5.5,y:8.2,icon:'🦆',ih:40},
+      {id:'scarecrow',label:'Scarecrow',k:'scarecrow',type:'task',x:22,y:8.4,icon:'🧹',ih:74,b:[12,10]},
+      {id:'basket',label:'Apple Basket (E: eat one)',k:'basket',type:'task',x:20.5,y:13,icon:'🍎',b:[24,10]},
+      {id:'toRiver',label:'Riverside',type:'door',x:12.5,y:16.8,icon:'🌊',ih:42,to:'riverside',spawn:[2,10]},
+      {id:'toOrchard',label:'Old Orchard',type:'door',x:22.5,y:16.8,icon:'🍎',ih:42,to:'orchard',spawn:[2,10]},
+    ]},
+  market:{ name:'Market Square', w:25,h:19, bg:'#8fd3ff',
+    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===0&&y===9)(x,y)===2?2:(y===9||x===12)?1:0,
+    props:[...trees([[3,4],[21,4],[3,15],[21,15]]),
+      {k:'fountain',x:12.5,y:8.2,b:[78,28]},{k:'stall',x:6,y:6,b:[110,50]},{k:'stall',x:19,y:6,b:[110,50]}],
+    triggers:[
+      {id:'toTownMarket',label:'Back to Town',type:'door',auto:true,x:0.3,y:9.9,to:'town',spawn:[22.6,9.9]},
+      {id:'marketFountain',label:'Look at the Fountain',type:'explore',x:12.5,y:8.2,icon:'⛲',ih:42},
+      {id:'marketStallA',label:'Browse the Bakery Stall',type:'explore',x:6,y:7.3,icon:'🥖',ih:48},
+      {id:'marketStallB',label:'Browse the Flower Stall',type:'explore',x:19,y:7.3,icon:'💐',ih:48},
+    ]},
+  riverside:{ name:'Quiet Riverside', w:25,h:19, bg:'#83c9f4',
+    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===0&&y===9)(x,y)===2?2:(y===9||y===10)?1:0,
+    props:[...trees([[3,3],[8,4],[20,3],[22,15],[5,16],[14,15]]),
+      {k:'river',x:12.5,y:9.2,b:[690,48]},{k:'bridge',x:12.5,y:9.2,b:[110,58]}],
+    triggers:[
+      {id:'toFieldRiver',label:'Back to Field',type:'door',auto:true,x:0.3,y:9.9,to:'field',spawn:[22.6,9.9]},
+      {id:'river',label:'Watch the River',type:'explore',x:17,y:7.1,icon:'🌊',ih:44},
+      {id:'bridge',label:'Cross the Bridge',type:'explore',x:12.5,y:9.2,icon:'🌉',ih:48},
+      {id:'toMill',label:'Old Mill',type:'door',x:23.7,y:9.9,icon:'⚙️',ih:42,to:'mill',spawn:[2,10]},
+    ]},
+  orchard:{ name:'Old Orchard', w:25,h:19, bg:'#8fd8a2',
+    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===0&&y===9)(x,y)===2?2:(y===9||x===12)?1:0,
+    props:[...trees([[3,3],[7,5],[17,4],[22,3],[4,15],[9,14],[18,15],[22,12]]),
+      {k:'basket',x:12.5,y:7,b:[30,20]}],
+    triggers:[
+      {id:'toFieldOrchard',label:'Back to Field',type:'door',auto:true,x:0.3,y:9.9,to:'field',spawn:[22.6,9.9]},
+      {id:'orchardTrees',label:'Inspect the Apple Trees',type:'explore',x:12.5,y:7,icon:'🍎',ih:42},
+      {id:'orchardPath',label:'Follow the Old Path',type:'explore',x:20,y:12,icon:'🥾',ih:42},
+    ]},
+  mill:{ name:'Old Mill', w:25,h:19, bg:'#a8d8e8',
+    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===0&&y===9)(x,y)===2?2:(y===9||x===15)?1:0,
+    props:[...trees([[3,4],[6,15],[21,4],[22,15]]),{k:'mill',x:15,y:7,b:[150,120]}],
+    triggers:[
+      {id:'toRiverMill',label:'Back to Riverside',type:'door',auto:true,x:0.3,y:9.9,to:'riverside',spawn:[22.6,9.9]},
+      {id:'millWheel',label:'Inspect the Mill',type:'explore',x:15,y:7,icon:'⚙️',ih:70},
+      {id:'millCreek',label:'Follow the Creek',type:'explore',x:20,y:12,icon:'💧',ih:44},
+    ]},
+  house:{ name:"Bob's House", w:14,h:10, bg:'#1a1024', tile:border(14,10,3,4), props:[],
+    triggers:[
+      {id:'bed',label:'Go to Sleep',k:'bed',type:'bed',x:2.5,y:3.2,icon:'🛏️',ih:56,b:[64,30]},
+      {id:'kitchen',label:'Kitchen Table',k:'table',type:'task',x:9,y:5,icon:'🍳',ih:44,b:[48,20]},
+      {id:'exitHouse',label:'Leave House',k:'mat',type:'door',x:7,y:8.9,to:'town',spawn:[5.5,6.6]},
+    ]},
+  library:{ name:'Town Library', w:16,h:11, bg:'#1a1024', tile:border(16,11,3,4),
+    props:[{k:'shelf',x:3,y:2.1,b:[96,40]},{k:'shelf',x:13,y:2.1,b:[96,40]},{k:'table',x:5,y:6,b:[48,20]}],
+    triggers:[
+      {id:'shelf',label:'Bookshelf',k:'shelf',type:'task',x:8,y:2.1,icon:'📚',ih:70,b:[96,40]},
+      {id:'desk',label:'Checkout Desk',k:'table',type:'task',x:11,y:6,icon:'📖',ih:44,b:[48,20]},
+      {id:'exitLib',label:'Leave Library',k:'mat',type:'door',x:8,y:9.9,to:'town',spawn:[19.5,6.6]},
+    ]},
+};
+
+/* ============================================================
+   1. CORRUPTION MANAGER  (day, sanity, derived parameters)
+   ============================================================ */
+class CorruptionManager extends Phaser.Events.EventEmitter {
+  constructor(){ super(); this.day=1; this.done=new Set(); this.sanity=100; this.pillReadyAt=0; this.mayorMonster=false; }
+  get tasks(){ return DAYS[this.day]; }
+  get progress(){ return this.done.size/this.tasks.length; }
+  get phase(){ return this.day<=2?1:this.day<=5?2:3; }
+  // Low sanity pushes visuals harsher, but never past "mild" until Day 6.
+  get corruptionLevel(){
+    const c=LEVELS[this.day-1]+this.progress*0.05+(1-this.sanity/100)*0.2;
+    return Math.min(this.day<=5?0.6:1,c);
+  }
+  get params(){
+    const c=this.corruptionLevel, lerp=Phaser.Math.Linear;
+    return { musicPitch:lerp(1,0.6,c), uiJitterAmount:c<0.3?0:lerp(0,6,c), npcFollowSpeed:c<0.5?0:lerp(0,90,(c-0.5)*2),
+      lightingDarkness:lerp(0,0.8,c), desaturation:c, controlInvertChance:this.day>=7?0.2:0, phase:this.phase };
+  }
+  addSanity(d){ this.sanity=Phaser.Math.Clamp(this.sanity+d,0,100); }
+  completeTask(id){ if(this.done.has(id)) return false; this.done.add(id); this.emit('task',id); return true; }
+  allDone(){ return this.done.size>=this.tasks.length; }
+  nextDay(){ this.day=Math.min(10,this.day+1); this.done.clear(); this.sanity=Math.min(100,this.sanity+35); this.mayorMonster=this.day>=7; }
+}
+
+/* ============================================================
+   SOUND  (all synthesized with Web Audio - no asset files needed)
+   Generative music: pentatonic ukulele plucks that slow down, detune,
+   drop notes and hit wrong notes as corruption rises; drone fades in.
+   ============================================================ */
+class Sound {
+  constructor(state){ this.state=state; this.ctx=null; this.step=0; this.pos=3; }
+  start(){
+    if(this.ctx) return; const C=window.AudioContext||window.webkitAudioContext; if(!C) return;
+    const c=this.ctx=new C(); this.out=c.createGain(); this.out.gain.value=0.5; this.out.connect(c.destination);
+    this.mel=c.createBiquadFilter(); this.mel.type='lowpass'; this.mel.connect(this.out);
+    const lp=c.createBiquadFilter(); lp.frequency.value=180; lp.connect(this.out);
+    this.dg=c.createGain(); this.dg.gain.value=0; this.dg.connect(lp);
+    [55,55.9].forEach(f=>{ const o=c.createOscillator(); o.type='sawtooth'; o.frequency.value=f; o.connect(this.dg); o.start(); });
+    this.loop();
+  }
+  tone(f,d,type='sine',v=0.2,to=null,dest=null,when=0){
+    const c=this.ctx; if(!c) return; const t=c.currentTime+when, o=c.createOscillator(), g=c.createGain();
+    o.type=type; o.frequency.setValueAtTime(f,t); if(to) o.frequency.exponentialRampToValueAtTime(to,t+d);
+    g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(0.0001,t+d);
+    o.connect(g); g.connect(dest||this.out); o.start(t); o.stop(t+d+0.05);
+  }
+  noise(d,v=0.2,f=1000,q=1,type='bandpass'){
+    const c=this.ctx; if(!c) return; const n=(c.sampleRate*d)|0, b=c.createBuffer(1,n,c.sampleRate), a=b.getChannelData(0);
+    for(let i=0;i<n;i++) a[i]=Math.random()*2-1;
+    const s=c.createBufferSource(); s.buffer=b; const fl=c.createBiquadFilter(); fl.type=type; fl.frequency.value=f; fl.Q.value=q;
+    const g=c.createGain(), t=c.currentTime; g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(v,t+d*0.3); g.gain.exponentialRampToValueAtTime(0.0001,t+d);
+    s.connect(fl); fl.connect(g); g.connect(this.out); s.start();
+  }
+  loop(){
+    const st=this.state, c=st.corruptionLevel;
+    this.mel.frequency.value=7000-6200*c; this.dg.gain.value=c*c*0.14;
+    const scale=[0,2,4,7,9,12,14,16]; this.step++; this.pos=Phaser.Math.Clamp(this.pos+Phaser.Math.Between(-2,2),0,7);
+    if(!(c>0.45&&Math.random()<c-0.35)){
+      let semi=scale[this.pos]; if(c>0.5&&Math.random()<c) semi+=1;         // wrong notes
+      this.tone(261.6*Math.pow(2,(semi+(Math.random()-.5)*c*4)/12),0.5,'triangle',0.16,null,this.mel);
+    }
+    if(st.day===1&&this.step%4===0) this.tone(130.8,0.6,'sine',0.15);         // bassline only on Day 1
+    setTimeout(()=>this.loop(),260+520*c);
+  }
+  sfx(n){
+    if(!this.ctx) return; const c=this.state.corruptionLevel;
+    switch(n){
+      case 'success': if(c<0.55) [523,659,784].forEach((f,i)=>this.tone(f,0.25,'sine',0.18,null,null,i*0.08)); else { this.tone(180,0.5,'sawtooth',0.15,60); this.noise(0.4,0.2,900); } break;
+      case 'blip': this.tone(320*(1-c*0.5)+Math.random()*60,0.05,'square',0.04); break;
+      case 'crunch': this.noise(0.15,0.5,2500); this.noise(0.12,0.4,1800); break;
+      case 'good': [660,880,1100].forEach((f,i)=>this.tone(f,0.2,'sine',0.15,null,null,i*0.06)); break;
+      case 'bad': this.tone(220,0.5,'sawtooth',0.12,80); break;
+      case 'pill': this.tone(900,0.06,'square',0.1); this.tone(600,0.1,'sine',0.15,300,null,0.07); break;
+      case 'whisper': this.noise(1.8,0.3,2400+Math.random()*900,5); this.noise(1.8,0.2,1500,3); break;
+      case 'roar': this.tone(90,1.3,'sawtooth',0.3,35); this.tone(140,1,'square',0.1,50); this.noise(1.2,0.4,400,0.7,'lowpass'); break;
+      case 'creak': this.tone(110,1.0,'sawtooth',0.07,260); this.tone(114,1.0,'sawtooth',0.07,255); break;
+      case 'sting': this.tone(466,0.9,'sawtooth',0.14); this.tone(494,0.9,'sawtooth',0.14); this.tone(70,0.9,'square',0.2,40); break;
+      case 'beat': this.tone(60,0.18,'sine',0.5,35); this.tone(60,0.18,'sine',0.35,35,null,0.2); break;
+      case 'door': this.noise(0.25,0.3,300,1,'lowpass'); break;
+      case 'branch': this.noise(0.22,0.45,900,2); this.tone(120,0.18,'sawtooth',0.12,70); break;
+      case 'heartbeat': this.tone(65,0.16,'sine',0.55,45); this.tone(65,0.16,'sine',0.38,45,null,0.24); break;
+      case 'scream': this.noise(1.25,0.8,1500,2); this.tone(880,0.9,'sawtooth',0.28,180); this.tone(440,1.0,'square',0.16,90); break;
+    }
+  }
+}
+
+/* ============================================================
+   2. CHECKLIST UI
+   ============================================================ */
+class ChecklistUI {
+  constructor(scene,state){
+    this.scene=scene; this.state=state; this.rows=[]; this.open=state.uiOpen===true; state.uiOpen=this.open;
+    const f={fontFamily:FONT};
+    // header = the dropdown toggle (click it, or press T)
+    this.head=scene.add.rectangle(12,12,250,28,0xfbbf24,0.97).setOrigin(0).setScrollFactor(0).setDepth(9000)
+      .setStrokeStyle(4,0xf2b705).setInteractive({useHandCursor:true});
+    this.head.on('pointerdown',()=>this.toggle());
+    this.title=scene.add.text(22,17,'',{...f,fontSize:'16px',color:'#7c2d12',fontStyle:'bold'}).setScrollFactor(0).setDepth(9001);
+    this.body=scene.add.container(12,40).setScrollFactor(0).setDepth(9000).setVisible(this.open);
+    this.body.add(scene.add.rectangle(0,0,250,10+state.tasks.length*26,0xfff3a0,0.95).setOrigin(0).setStrokeStyle(4,0xf2b705));
+    state.tasks.forEach((t,i)=>{
+      const box=scene.add.text(10,6+i*26,'☐',{fontSize:'18px',color:'#333'});
+      const txt=scene.add.text(34,7+i*26,'',{...f,fontSize:'14px',color:'#333',wordWrap:{width:205}});
+      this.body.add([box,txt]); this.rows.push({task:t,box,txt,i,checked:state.done.has(t.id),glitchUntil:0,flipUntil:0});
+    });
+    this.onTask=id=>this.setStatus(id,true); state.on('task',this.onTask);
+    scene.events.once('shutdown',()=>state.off('task',this.onTask));
+    this.refresh();
+  }
+  toggle(){ this.open=!this.open; this.state.uiOpen=this.open; this.body.setVisible(this.open); this.refresh(); }
+  setStatus(id,done){ const r=this.rows.find(r=>r.task.id===id); if(!r) return; r.checked=done; this.refresh();
+    if(done&&this.state.corruptionLevel<0.5) this.starBurst(r.i); }
+  refresh(){
+    const c=this.state.corruptionLevel, now=this.scene.time.now; let done=0;
+    this.rows.forEach(r=>{
+      const bad=r.task.corruptText&&(c>=0.75||now<r.glitchUntil), shown=now<r.flipUntil?!r.checked:r.checked; if(r.checked) done++;
+      r.txt.setText(bad?r.task.corruptText:`${r.task.icon} ${r.task.text}`); r.txt.setColor(bad&&c>0.7?'#991b1b':'#333'); r.box.setText(shown?'☑':'☐');
+    });
+    const n=this.rows.length, pend=this.rows.filter(r=>!r.checked).map(r=>r.task.icon).join('');
+    this.title.setText(this.open?`📋 TASKS  ${done}/${n}   ▲`:`📋 TASKS  ${done}/${n}  ▼`);
+  }
+  starBurst(i){ const s=this.scene.add.text(40,this.open?46+i*26:26,'★',{fontSize:'28px',color:'#f59e0b'}).setScrollFactor(0).setDepth(9002);
+    this.scene.tweens.add({targets:s,scale:3,alpha:0,duration:500,onComplete:()=>s.destroy()}); }
+  update(time){
+    const p=this.state.params, c=this.state.corruptionLevel, j=p.uiJitterAmount;
+    this.rows.forEach(r=>{ r.txt.x=34+(j?Phaser.Math.FloatBetween(-j,j)*0.4:0); r.txt.y=r.box.y+1+(j?Phaser.Math.FloatBetween(-j,j)*0.4:0); });
+    if(c>=0.4&&Math.random()<0.003*(1+c*3)){      // glitches are only VISUAL and always revert
+      const r=Phaser.Utils.Array.GetRandom(this.rows);
+      if(Math.random()<0.5) r.flipUntil=time+Phaser.Math.Between(700,1800); else r.glitchUntil=time+Phaser.Math.Between(600,2000);
+      this.refresh(); this.scene.time.delayedCall(2000,()=>this.refresh());
+    }
+  }
+}
+
+/* ============================================================
+   DIALOGUE BOX  (typewriter, blips, branching choices via 1 / 2)
+   ============================================================ */
+class Dialogue {
+  constructor(sc,keys){
+    this.sc=sc; this.k=keys; this.active=false; this.timer=null; this.choosing=false;
+    this.c=sc.add.container(0,0).setScrollFactor(0).setDepth(9500).setVisible(false);
+    this.bg=sc.add.rectangle(40,425,720,145,0xfff8dc,0.97).setOrigin(0).setStrokeStyle(5,0x92400e);
+    this.nm=sc.add.text(58,435,'',{fontFamily:FONT,fontSize:'19px',fontStyle:'bold',color:'#c2410c'});
+    this.tx=sc.add.text(58,466,'',{fontFamily:FONT,fontSize:'18px',color:'#222',wordWrap:{width:684},lineSpacing:4});
+    this.hint=sc.add.text(750,562,'▼ E',{fontFamily:FONT,fontSize:'14px',color:'#92400e'}).setOrigin(1,1);
+    this.c.add([this.bg,this.nm,this.tx,this.hint]);
+  }
+  open(lines,onEnd){
+    this.q=[...lines]; this.onEnd=onEnd; this.active=true; this.c.setVisible(true);
+    const bad=this.sc.state.phase===3; this.bg.setFillStyle(bad?0x1a0708:0xfff8dc,0.97).setStrokeStyle(5,bad?0x7f1d1d:0x92400e); this.tx.setColor(bad?'#ff5555':'#222');
+    this.next();
+  }
+  next(){
+    if(!this.q.length){ this.active=false; this.c.setVisible(false); if(this.onEnd) this.onEnd(); return; }
+    const l=this.cur=this.q.shift(); this.nm.setText(l.who); this.full=l.text; this.i=0; this.choosing=false; this.hint.setVisible(true); this.tx.setText('');
+    if(l.fx) this.sc.onFx(l.fx);
+    if(this.timer) this.timer.remove();
+    this.timer=this.sc.time.addEvent({delay:24,loop:true,callback:()=>{
+      this.i++; this.tx.setText(this.full.slice(0,this.i)); if(this.i%2===0) this.sc.audio.sfx('blip'); if(this.i>=this.full.length) this.doneTyping(); }});
+  }
+  doneTyping(){
+    if(this.timer){ this.timer.remove(); this.timer=null; } this.tx.setText(this.full);
+    if(this.cur.ask){ this.choosing=true; this.tx.setText(this.full+'\n\n1) '+this.cur.ask[0]+'        2) '+this.cur.ask[1]); this.hint.setVisible(false); }
+  }
+  update(){
+    const J=Phaser.Input.Keyboard.JustDown, k=this.k;
+    this.tx.x=58+(this.sc.state.phase===3?Phaser.Math.FloatBetween(-1.5,1.5):0);
+    if(this.timer){ if(J(k.E)||J(k.SP)) this.doneTyping(); return; }
+    if(this.choosing){ if(J(k.N1)) this.pick(0); else if(J(k.N2)) this.pick(1); return; }
+    if(J(k.E)||J(k.SP)) this.next();
+  }
+  pick(i){ this.q.unshift(...this.cur.then[i]); this.next(); }
+}
+
+/* ============================================================
+   ART  (all drawn in code - swap for real sprite sheets later)
+   ============================================================ */
+const tex=(s,key,w,h,fn)=>{ const g=s.make.graphics({add:false}); fn(g); g.generateTexture(key,w,h); g.destroy(); };
+function drawPerson(g,o,dir,f,walk){
+  const sw=walk?[-3,0,3,0][f]:0, b=12-(walk?f%2:f);
+  g.fillStyle(0x000000,0.25).fillEllipse(16,50,22,6); g.fillStyle(o.pants);
+  if(dir==='s'){ g.fillRect(12+sw,40,6,10); g.fillRect(16-sw,40,6,10); } else { g.fillRect(10,40,6,10-(sw>0?3:0)); g.fillRect(17,40,6,10-(sw<0?3:0)); }
+  g.fillStyle(0x222222);
+  if(dir==='s'){ g.fillRect(12+sw,48,7,2); g.fillRect(16-sw,48,7,2); } else { g.fillRect(9,48,7,2); g.fillRect(17,48,7,2); }
+  if(dir!=='s'){ g.fillStyle(o.shirt).fillRect(4,b+13+sw,5,10).fillRect(24,b+13-sw,5,10); g.fillStyle(o.skin).fillRect(4,b+21+sw,5,3).fillRect(24,b+21-sw,5,3); }
+  g.fillStyle(o.shirt).fillRoundedRect(8,b+11,17,18,4); if(o.sash) g.fillStyle(o.sash).fillRect(10,b+16,4,12);
+  if(dir==='s'){ g.fillStyle(o.shirt).fillRect(14-sw,b+13,5,10); g.fillStyle(o.skin).fillRect(14-sw,b+21,5,3); }
+  g.fillStyle(o.skin).fillCircle(16,b+4,9); g.fillStyle(o.hair); g.beginPath(); g.arc(16,b+4,9,Math.PI,Math.PI*2); g.closePath(); g.fillPath();
+  if(dir==='u') g.fillCircle(16,b+4,9); if(dir==='s') g.fillRect(7,b+2,6,8);
+  g.fillStyle(0x222222);
+  if(dir==='d'){ g.fillCircle(12.5,b+6,1.6); g.fillCircle(19.5,b+6,1.6); g.fillStyle(0xf28b82).fillRect(14,b+9,4,1.5); }
+  if(dir==='s') g.fillCircle(21,b+6,1.6);
+  if(o.extra) o.extra(g,b,dir);
+}
+const BOB={skin:0xffcf9f,hair:0x5b3a1e,shirt:0xf97316,pants:0x2563eb,extra:(g,b)=>{ g.fillStyle(0xdc2626).fillRect(8,b-4,17,4).fillRect(5,b-1,10,2); }};
+const MAYOR={skin:0xffcf9f,hair:0xbbbbbb,shirt:0x7c3aed,pants:0x374151,sash:0xfacc15,
+  extra:(g,b,d)=>{ g.fillStyle(0x111111).fillRect(6,b-3,20,3).fillRect(9,b-13,14,11); g.fillStyle(0xdc2626).fillRect(9,b-6,14,2); if(d==='d') g.fillStyle(0x888888).fillRect(10,b+9,12,2); }};
+
+function makeTextures(s){
+  if(s.textures.exists('tiles')) return;
+  tex(s,'tiles',T*5,T,g=>{
+    g.fillStyle(0x9be564).fillRect(0,0,T,T); g.fillStyle(0x86d34f); [[4,6],[20,4],[12,18],[26,24],[6,27],[24,14]].forEach(([x,y])=>g.fillRect(x,y,3,2));
+    g.fillStyle(0xf3d98b).fillRect(T,0,T,T); g.fillStyle(0xe0c26f); [[6,8],[22,20],[14,26]].forEach(([x,y])=>g.fillRect(T+x,y,4,3));
+    g.fillStyle(0x9be564).fillRect(2*T,0,T,T); g.fillStyle(0x8b5e3c).fillRect(2*T,6,T,6).fillRect(2*T,18,T,6).fillRect(2*T+4,2,5,28).fillRect(2*T+23,2,5,28);
+    g.fillStyle(0xc98a54).fillRect(3*T,0,T,T); g.lineStyle(2,0xa8703f); for(let i=0;i<4;i++) g.strokeRect(3*T,i*8,T,8);
+    g.fillStyle(0x6d3f6a).fillRect(4*T,0,T,T); g.lineStyle(2,0x522d50).strokeRect(4*T+1,1,T-2,T-2);
+  });
+  ['d','u','s'].forEach(d=>{
+    for(let i=0;i<2;i++) tex(s,`bob_${d}_i${i}`,32,52,g=>drawPerson(g,BOB,d,i,false));
+    for(let i=0;i<4;i++) tex(s,`bob_${d}_w${i}`,32,52,g=>drawPerson(g,BOB,d,i,true));
+    s.anims.create({key:`bob_idle_${d}`,frames:[0,1].map(i=>({key:`bob_${d}_i${i}`})),frameRate:2,repeat:-1});
+    s.anims.create({key:`bob_walk_${d}`,frames:[0,1,2,3].map(i=>({key:`bob_${d}_w${i}`})),frameRate:9,repeat:-1});
+  });
+  for(let i=0;i<2;i++) tex(s,`mayor_i${i}`,32,52,g=>drawPerson(g,MAYOR,'d',i,false));
+  s.anims.create({key:'mayor_idle',frames:[0,1].map(i=>({key:`mayor_i${i}`})),frameRate:2,repeat:-1});
+  tex(s,'tree',48,64,g=>{ g.fillStyle(0x000000,0.2).fillEllipse(24,62,30,7); g.fillStyle(0x7c4a21).fillRect(20,38,8,25);
+    g.fillStyle(0x2f9e44).fillCircle(24,22,20).fillCircle(11,34,13).fillCircle(37,34,13); g.fillStyle(0x51cf66).fillCircle(18,16,8); });
+  tex(s,'sunflower',26,44,g=>{ g.fillStyle(0x2f9e44).fillRect(11,16,3,28).fillEllipse(6,32,10,5).fillEllipse(19,26,10,5);
+    g.fillStyle(0xffd43b); for(let a=0;a<8;a++) g.fillCircle(13+Math.cos(a*Math.PI/4)*8,12+Math.sin(a*Math.PI/4)*8,4.5); g.fillStyle(0x6f4e37).fillCircle(13,12,5.5); });
+  tex(s,'mailbox',30,46,g=>{ g.fillStyle(0x8b5e3c).fillRect(13,20,4,26); g.fillStyle(0x3b82f6).fillRoundedRect(2,6,26,16,7); g.fillStyle(0xdc2626).fillRect(24,0,3,11).fillRect(24,0,6,4); g.fillStyle(0x1e3a8a).fillRect(6,13,12,3); });
+  tex(s,'basket',36,28,g=>{ g.fillStyle(0xdc2626).fillCircle(11,8,6).fillCircle(20,7,6).fillCircle(26,9,5).fillStyle(0xb45309).fillRoundedRect(2,10,32,17,5); g.lineStyle(2,0x8a4a0f).strokeRect(8,12,3,13).strokeRect(20,12,3,13); });
+  tex(s,'well',44,56,g=>{ g.fillStyle(0x000000,0.2).fillEllipse(22,54,40,7); g.fillStyle(0x7c4a21).fillRect(6,10,4,26).fillRect(34,10,4,26); g.fillStyle(0xdc2626).fillTriangle(0,12,22,0,44,12); g.fillStyle(0x9ca3af).fillRect(2,34,40,20); g.lineStyle(2,0x6b7280).strokeRect(2,34,40,20); g.fillStyle(0x1e3a8a).fillRect(8,36,28,6); });
+  tex(s,'board',48,60,g=>{ g.fillStyle(0x7c4a21).fillRect(8,30,4,30).fillRect(36,30,4,30); g.fillStyle(0xa16207).fillRect(2,4,44,32); g.lineStyle(3,0x5a3a20).strokeRect(2,4,44,32);
+    g.fillStyle(0xffffff).fillRect(7,9,14,12).fillRect(26,10,15,10).fillRect(12,23,20,9); g.fillStyle(0xdc2626).fillCircle(14,9,2).fillCircle(33,10,2); });
+  tex(s,'pond',100,50,g=>{ g.fillStyle(0x3b82f6).fillEllipse(50,28,96,44); g.fillStyle(0x93c5fd).fillEllipse(38,22,30,10); g.fillStyle(0xfde047).fillCircle(66,26,6).fillCircle(32,32,6); g.fillStyle(0xfb923c).fillRect(71,25,5,3).fillRect(24,31,5,3); });
+  tex(s,'scarecrow',40,64,g=>{ g.fillStyle(0x7c4a21).fillRect(18,22,4,42).fillRect(2,28,36,4); g.fillStyle(0xdc2626).fillRect(12,30,16,16); g.fillStyle(0xe8c98b).fillCircle(20,16,9);
+    g.fillStyle(0x8b5e3c).fillRect(8,8,24,3).fillRect(12,0,16,9); g.fillStyle(0x222222).fillRect(15,14,3,3).fillRect(23,14,3,3).fillRect(16,20,9,2); g.fillStyle(0xfacc15).fillRect(0,30,5,7).fillRect(35,30,5,7); });
+  tex(s,'house',160,128,g=>{ g.fillStyle(0x000000,0.15).fillEllipse(80,124,150,10); g.fillStyle(0xb45309).fillRect(120,6,16,34); g.fillStyle(0xfde68a).fillRect(8,44,144,82).lineStyle(3,0x5a3a20).strokeRect(8,44,144,82);
+    g.fillStyle(0xdc2626).fillTriangle(0,50,80,4,160,50); g.fillStyle(0x7c4a21).fillRect(68,84,24,42); g.fillStyle(0xfacc15).fillCircle(86,106,2);
+    g.fillStyle(0x93c5fd).fillRect(22,64,28,26).fillRect(110,64,28,26); g.lineStyle(2,0xffffff).strokeRect(22,64,28,26).strokeRect(110,64,28,26); });
+  tex(s,'library',160,128,g=>{ g.fillStyle(0x000000,0.15).fillEllipse(80,124,150,10); g.fillStyle(0xe5e7eb).fillRect(8,50,144,76); g.fillStyle(0xcbd5e1).fillTriangle(0,52,80,6,160,52); g.fillStyle(0x1e3a8a).fillRect(58,34,44,12);
+    g.fillStyle(0xf8fafc); [18,44,102,128].forEach(x=>g.fillRect(x,54,14,72)); g.fillStyle(0x5b3a1e).fillRoundedRect(66,80,28,46,8); g.fillStyle(0xfacc15).fillCircle(88,104,2); });
+  tex(s,'bed',64,48,g=>{ g.fillStyle(0x8b5e3c).fillRect(0,6,64,42); g.fillStyle(0xf8fafc).fillRect(4,10,56,34); g.fillStyle(0x3b82f6).fillRect(22,10,38,34); g.fillStyle(0xffffff).fillRoundedRect(6,14,18,14,5); g.lineStyle(2,0x1e3a8a).strokeRect(22,10,38,34); });
+  tex(s,'shelf',96,56,g=>{ g.fillStyle(0x8b5e3c).fillRect(0,0,96,56); g.fillStyle(0x5a3a20).fillRect(3,3,90,24).fillRect(3,30,90,23);
+    const c=[0xdc2626,0x2563eb,0x16a34a,0xfacc15,0x9333ea,0xf97316]; for(let r=0;r<2;r++) for(let i=0;i<13;i++) g.fillStyle(c[(i+r*2)%6]).fillRect(5+i*7,(r?33:6)+(i%3),5,r?19:21-(i%3)); });
+  tex(s,'table',48,36,g=>{ g.fillStyle(0xb07a4a).fillRect(0,6,48,16).fillStyle(0x7c4a21).fillRect(3,22,5,12).fillRect(40,22,5,12); });
+  tex(s,'fountain',84,56,g=>{ g.fillStyle(0x000000,0.18).fillEllipse(42,50,76,10); g.fillStyle(0x94a3b8).fillEllipse(42,38,76,24); g.fillStyle(0x60a5fa).fillEllipse(42,35,58,16); g.fillStyle(0xe5e7eb).fillRect(38,14,8,22); g.fillStyle(0x93c5fd).fillTriangle(42,2,28,25,56,25); });
+  tex(s,'stall',110,62,g=>{ g.fillStyle(0x7c4a21).fillRect(8,22,94,34); g.fillStyle(0xf59e0b).fillTriangle(2,24,55,0,108,24); g.fillStyle(0xfef3c7).fillRect(12,30,86,20); });
+  tex(s,'river',690,54,g=>{ g.fillStyle(0x3b82f6).fillRect(0,4,690,46); g.fillStyle(0x93c5fd); for(let x=10;x<680;x+=65) g.fillEllipse(x,20,38,6); });
+  tex(s,'bridge',110,70,g=>{ g.fillStyle(0x7c4a21).fillRect(0,8,110,54); for(let x=5;x<110;x+=18) g.fillStyle(0xa16207).fillRect(x,8,10,54); g.lineStyle(3,0x5a3a20).strokeRect(0,8,110,54); });
+  tex(s,'mill',150,120,g=>{ g.fillStyle(0x000000,0.15).fillEllipse(75,116,140,10); g.fillStyle(0x92400e).fillRect(18,45,114,70); g.fillStyle(0x78350f).fillTriangle(5,48,75,5,145,48); g.fillStyle(0xfacc15).fillRect(66,70,18,45); g.fillStyle(0x60a5fa).fillRect(38,62,20,18).fillRect(92,62,20,18); g.lineStyle(4,0x5a3a20).strokeCircle(75,75,28); });
+  tex(s,'mat',36,14,g=>{ g.fillStyle(0xb45309).fillRoundedRect(0,0,36,14,4); g.lineStyle(2,0xfacc15).strokeRoundedRect(3,3,30,8,3); });
+  // --- horror sprites
+  tex(s,'monster',70,96,g=>{ g.fillStyle(0x000000,0.3).fillEllipse(35,93,56,9);
+    g.fillStyle(0x24070d).fillRect(24,34,22,54).fillRect(6,30,11,62).fillRect(53,30,11,62);
+    g.fillStyle(0xe5e7eb).fillTriangle(6,88,11,88,8,96).fillTriangle(12,88,17,88,14,96).fillTriangle(53,88,58,88,55,96).fillTriangle(59,88,64,88,61,96);
+    g.fillStyle(0x4a0d18).fillCircle(35,26,20); g.fillStyle(0x111111).fillRect(16,8,38,4).fillRect(22,0,26,10);
+    g.fillStyle(0xff1a1a).fillCircle(27,24,5).fillCircle(43,24,5); g.fillStyle(0xffffff).fillCircle(27,24,1.6).fillCircle(43,24,1.6);
+    g.fillStyle(0x000000).fillRect(20,32,30,12); g.fillStyle(0xffffff);
+    for(let i=0;i<7;i++){ g.fillTriangle(21+i*4.4,32,25+i*4.4,32,23+i*4.4,39); g.fillTriangle(21+i*4.4,44,25+i*4.4,44,23+i*4.4,37); } });
+  tex(s,'shadow',44,80,g=>{ g.fillStyle(0x000000,0.92).fillRect(12,22,20,54).fillCircle(22,14,12).fillRect(4,26,8,40).fillRect(32,26,8,40); g.fillStyle(0xffffff).fillRect(16,11,4,7).fillRect(25,11,4,7); });
+  const c=s.textures.createCanvas('vignette',800,600), ctx=c.getContext(), gr=ctx.createRadialGradient(400,300,120,400,300,480);
+  gr.addColorStop(0,'rgba(0,0,0,0)'); gr.addColorStop(1,'rgba(0,0,0,1)'); ctx.fillStyle=gr; ctx.fillRect(0,0,800,600); c.refresh();
+}
+
+/* ============================================================
+   TITLE / END
+   ============================================================ */
+class TitleScene extends Phaser.Scene {
+  constructor(){ super('Title'); }
+  create(){
+    makeTextures(this); this.cameras.main.setBackgroundColor('#87ceeb');
+    this.add.rectangle(0,470,800,140,0x9be564).setOrigin(0).setDepth(-1);
+    for(let i=0;i<6;i++){ const t=this.add.image(60+i*140,470,'tree').setOrigin(.5,1).setScale(1.6); this.tweens.add({targets:t,angle:{from:-2,to:2},duration:1600+i*150,yoyo:true,repeat:-1}); }
+    const title=this.add.text(400,140,"Bob's Big\nBusy Day",{fontFamily:FONT,fontSize:'72px',color:'#fff',stroke:'#f59e0b',strokeThickness:10,align:'center'}).setOrigin(.5);
+    this.tweens.add({targets:title,scale:1.06,duration:900,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
+    const bob=this.add.sprite(400,440,'bob_d_i0').setScale(2.6).setOrigin(.5,1).play('bob_walk_d');
+    this.tweens.add({targets:bob,x:{from:250,to:550},duration:2600,yoyo:true,repeat:-1});
+    const go=this.add.text(400,540,'Click or press ENTER to start',{fontFamily:FONT,fontSize:'24px',color:'#1e3a8a',backgroundColor:'#fde047',padding:{x:14,y:6}}).setOrigin(.5);
+    this.tweens.add({targets:go,alpha:.5,duration:700,yoyo:true,repeat:-1});
+    const start=()=>{ this.registry.get('audio').start(); this.scene.start('Room',{room:'house',spawn:[7,7.2]}); };
+    this.input.once('pointerdown',start); this.input.keyboard.once('keydown-ENTER',start);
+  }
+}
+class EscapeCutscene extends Phaser.Scene {
+  constructor(){ super('EscapeCutscene'); }
+  create(){
+    this.audio=this.registry.get('audio');
+    this.cameras.main.setBackgroundColor('#050507');
+    this.input.keyboard.removeAllKeys(true);
+    this.index=0; this.finished=false; this.root=this.add.container(0,0).setDepth(1);
+    this.caption=this.add.text(400,535,'',{fontFamily:'Georgia, serif',fontSize:'28px',color:'#f3f3f3',stroke:'#000',strokeThickness:8,align:'center',wordWrap:{width:720}}).setOrigin(.5).setDepth(50);
+    this.sub=this.add.text(400,575,'',{fontFamily:FONT,fontSize:'15px',color:'#aaa'}).setOrigin(.5).setDepth(50);
+    this.showSlide(0);
+  }
+  clearScene(){ this.root.removeAll(true); }
+  addForest(g,night=1){
+    g.fillStyle(night?0x070a0d:0x101a18,1).fillRect(0,0,800,600);
+    g.fillStyle(night?0x101916:0x183024,1).fillRect(0,330,800,270);
+    // layered forest silhouettes
+    for(let i=0;i<15;i++){
+      const x=-20+i*62+(i%2)*10, h=120+(i%5)*28;
+      g.fillStyle(i%3===0?0x0b120f:0x111b16,1).fillRect(x,330-h,18,h+270);
+      g.fillTriangle(x+9,330-h-75,x-55,330-h+55,x+73,330-h+55);
+      g.fillTriangle(x+9,330-h-25,x-38,330-h+75,x+56,330-h+75);
+    }
+    // ground path
+    g.fillStyle(0x262521,1).fillTriangle(300,600,370,350,430,350,500,600);
+    g.fillStyle(0x34332e,1).fillTriangle(345,600,385,390,415,390,455,600);
+    // moon
+    g.fillStyle(0xd9d7b5,0.8).fillCircle(675,90,34);
+    g.fillStyle(night?0x070a0d:0x101a18,0.8).fillCircle(690,82,30);
+  }
+  bobThirdPerson(x,y,scale=2,run=false,flip=false){
+    const b=this.add.sprite(x,y,'bob_d_i0').setOrigin(.5,.96).setScale(scale).setDepth(20);
+    b.play(run?'bob_walk_d':'bob_idle_d'); b.setFlipX(flip); return b;
+  }
+  figureThirdPerson(x,y,scale=1){
+    const g=this.add.graphics().setDepth(18);
+    g.fillStyle(0x050505,1).fillEllipse(x,y-42*scale,28*scale,50*scale);
+    g.fillRect(x-13*scale,y-18*scale,26*scale,65*scale);
+    g.fillRect(x-24*scale,y-8*scale,10*scale,55*scale).fillRect(x+14*scale,y-8*scale,10*scale,55*scale);
+    g.fillStyle(0x17070a,1).fillEllipse(x,y-45*scale,9*scale,5*scale);
+    return g;
+  }
+  sceneRun(){
+    const g=this.add.graphics(); this.root.add(g); this.addForest(g);
+    // cinematic side/behind view: Bob is visible running away from camera
+    const bob=this.bobThirdPerson(400,510,2.5,true,false); this.root.add(bob);
+    const dust=this.add.graphics().setDepth(19); this.root.add(dust);
+    for(let i=0;i<8;i++) dust.fillStyle(0x77715f,0.18).fillCircle(380+i*6,555-(i%3)*8,4+(i%2)*3);
+    this.tweens.add({targets:bob,x:{from:390,to:410},duration:240,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
+    this.tweens.add({targets:bob,scaleX:{from:2.45,to:2.65},duration:180,yoyo:true,repeat:-1});
+    this.text('RUN.','Bob tears through the woods, never looking back.');
+  }
+  sceneNoise(){
+    const g=this.add.graphics(); this.root.add(g); this.addForest(g);
+    const bob=this.bobThirdPerson(400,500,2.35,false,false); this.root.add(bob);
+    // a branch bends/snaps behind Bob
+    const br=this.add.graphics().setDepth(17); this.root.add(br);
+    const drawBranch=(ang)=>{br.clear(); br.lineStyle(8,0x3b281d,1); br.beginPath(); br.moveTo(585,250); br.lineTo(540,330); br.lineTo(500,300); br.strokePath(); br.setRotation(ang);};
+    drawBranch(0);
+    this.tweens.add({targets:br,angle:{from:-.04,to:.08},duration:180,yoyo:true,repeat:4});
+    this.audio&&this.audio.sfx('branch');
+    this.text('...CRACK.','Bob freezes. Something moved behind him.');
+  }
+  sceneLookBack(){
+    const g=this.add.graphics(); this.root.add(g); this.addForest(g);
+    // Bob turns his body toward the sound; camera remains third-person
+    const bob=this.bobThirdPerson(420,500,2.4,false,true); this.root.add(bob);
+    const glow=this.add.circle(420,415,85,0x6d7c6b,0.08).setDepth(3); this.root.add(glow);
+    this.tweens.add({targets:glow,alpha:0,duration:1200});
+    this.text('Bob looks behind him.','Nothing. Just trees, fog, and the sound of his own breathing.');
+  }
+  sceneTurn(){
+    const g=this.add.graphics(); this.root.add(g); this.addForest(g);
+    const bob=this.bobThirdPerson(420,505,2.4,false,false); this.root.add(bob);
+    this.figureThirdPerson(400,300,0.75);
+    const fog=this.add.rectangle(400,390,520,130,0x9aa59a,0.06).setDepth(10); this.root.add(fog);
+    this.text('He turns back around.','A figure is standing far down the path.');
+    this.audio&&this.audio.sfx('heartbeat');
+  }
+  sceneFirstPerson(){
+    const g=this.add.graphics(); this.root.add(g);
+    g.fillStyle(0x030307,1).fillRect(0,0,800,600);
+    g.fillStyle(0x0b1110,1).fillRect(0,350,800,250);
+    for(let i=0;i<13;i++){
+      const x=i*67, h=170+(i%4)*35;
+      g.fillStyle(0x101714,1).fillRect(x,350-h,15,h+250);
+      g.fillTriangle(x+7,350-h-70,x-58,350-h+55,x+70,350-h+55);
+    }
+    g.fillStyle(0x25241f,1).fillTriangle(265,600,400,395,535,600);
+    // subtle first-person hands at bottom
+    g.fillStyle(0x8b5a3c,1).fillRoundedRect(245,505,72,95,24).fillRoundedRect(483,505,72,95,24);
+    g.fillStyle(0x2b2b2b,1).fillEllipse(281,540,62,38).fillEllipse(519,540,62,38);
+    // distant figure
+    const m=this.add.sprite(400,330,'monster').setScale(.16).setAlpha(.75).setDepth(20); this.root.add(m);
+    this.caption.setY(525);
+    this.text('WOAH... WHAT’S THA...','Bob squints. The figure is getting closer.');
+    this.audio&&this.audio.sfx('heartbeat');
+    this.tweens.add({targets:m,alpha:1,scale:.2,duration:900,yoyo:true,repeat:1});
+  }
+  text(title,body){
+    this.caption.setText(title+'\n'+body).setAlpha(0);
+    this.tweens.add({targets:this.caption,alpha:1,duration:500});
+  }
+  showSlide(i){
+    if(this.finished) return; this.index=i; this.clearScene();
+    const slides=[
+      ['run',5200],['noise',4800],['look',5000],['turn',5200],['fp',3000]
+    ];
+    const s=slides[i]; if(!s) return this.animateFinal();
+    if(s[0]==='run') this.sceneRun();
+    if(s[0]==='noise') this.sceneNoise();
+    if(s[0]==='look') this.sceneLookBack();
+    if(s[0]==='turn') this.sceneTurn();
+    if(s[0]==='fp') this.sceneFirstPerson();
+    this.time.delayedCall(s[1],()=>this.showSlide(i+1));
+  }
+  animateFinal(){
+    this.clearScene(); this.caption.setText('');
+    const g=this.add.graphics().setDepth(2); g.fillStyle(0x020204,1).fillRect(0,0,800,600); g.fillStyle(0x0b100e,1).fillRect(0,360,800,240);
+    for(let i=0;i<11;i++){const x=i*76;g.fillStyle(0x0b110f,1).fillRect(x,220,16,380);g.fillTriangle(x+8,160,x-55,325,x+70,325);}
+    const monster=this.add.sprite(400,330,'monster').setScale(.18).setDepth(10);
+    this.audio&&this.audio.sfx('heartbeat');
+    this.tweens.add({targets:monster,scale:.26,duration:700,ease:'Sine.easeIn'});
+    this.time.delayedCall(1000,()=>{
+      this.audio&&this.audio.sfx('scream');
+      const red=this.add.rectangle(400,300,800,600,0xb00000,.18).setDepth(30);
+      this.tweens.add({targets:red,alpha:.78,duration:70,yoyo:true,repeat:12});
+      this.cameras.main.shake(1000,.055); monster.setAlpha(1);
+      this.tweens.add({targets:monster,scale:9.5,y:310,duration:430,ease:'Cubic.easeIn',onUpdate:()=>this.cameras.main.shake(80,.035),onComplete:()=>this.jumpscare()});
+    });
+  }
+  jumpscare(){
+    if(this.finished) return; this.finished=true;
+    this.audio&&this.audio.sfx('scream'); this.cameras.main.flash(140,255,255,255);
+    const red=this.add.rectangle(400,300,800,600,0xa00000,.82).setDepth(40);
+    this.tweens.add({targets:red,alpha:.45,duration:80,yoyo:true,repeat:7});
+    this.add.text(400,300,'YOU SHOULD NOT HAVE LOOKED.',{fontFamily:'Georgia, serif',fontSize:'36px',color:'#ffdddd',stroke:'#300000',strokeThickness:8,align:'center',wordWrap:{width:720}}).setOrigin(.5).setDepth(42);
+    this.time.delayedCall(1900,()=>this.scene.start('End'));
+  }
+}
+class EndScene extends Phaser.Scene {
+  constructor(){ super('End'); }
+  create(){
+    this.cameras.main.setBackgroundColor('#000');
+    const lines=[
+      ['Bob went to sleep...',0xdddddd],
+      ['The house was quiet.',0xaaaaaa],
+      ['The town kept moving.',0x777777],
+      ['Nobody came looking.',0x555555],
+      ['Nobody heard him.',0x555555],
+      ['Bob goes to sleep...',0xff4444],
+      ['FOREVER.',0xff1111]
+    ];
+    lines.forEach((entry,i)=>this.time.delayedCall(i*1900,()=>{
+      const t=this.add.text(400,170+i*46,entry[0],{fontFamily:'Georgia, serif',fontSize:i>=5?'31px':'26px',color:'#'+entry[1].toString(16).padStart(6,'0'),stroke:'#000',strokeThickness:6}).setOrigin(.5).setAlpha(0);
+      this.tweens.add({targets:t,alpha:1,duration:900});
+      if(i===5) this.audio=this.registry.get('audio'),this.audio&&this.audio.sfx('heartbeat');
+      if(i===6) this.cameras.main.flash(180,120,0,0);
+    }));
+    this.time.delayedCall(lines.length*1900+1800,()=>{
+      this.add.text(400,550,'Press ENTER to return to the beginning',{fontFamily:FONT,fontSize:'16px',color:'#666'}).setOrigin(.5);
+      this.input.keyboard.once('keydown-ENTER',()=>location.reload());
+    });
+  }
+}
+
+/* ============================================================
+   WORLD MAP UI
+   ============================================================ */
+class WorldMapUI {
+  constructor(scene,state){
+    this.scene=scene; this.state=state; this.open=false;
+    this.c=scene.add.container(0,0).setScrollFactor(0).setDepth(9900).setVisible(false);
+    this.bg=scene.add.rectangle(400,300,720,500,0x172033,0.97).setStrokeStyle(5,0xfacc15);
+    this.title=scene.add.text(400,55,'🗺️ TOWN MAP',{fontFamily:FONT,fontSize:'30px',fontStyle:'bold',color:'#fde68a'}).setOrigin(.5);
+    this.hint=scene.add.text(400,535,'Click an area to travel  •  M / ESC to close',{fontFamily:FONT,fontSize:'15px',color:'#e5e7eb'}).setOrigin(.5);
+    this.c.add([this.bg,this.title,this.hint]);
+    this.buttons=[];
+    const areas=[
+      ['town','🏘️ Town',400,145],['field','🌻 Sunflower Field',220,235],['market','🛒 Market Square',580,235],
+      ['riverside','🌊 Quiet Riverside',220,355],['orchard','🍎 Old Orchard',580,355],['mill','⚙️ Old Mill',400,455]
+    ];
+    areas.forEach(([id,label,x,y])=>{
+      const r=scene.add.rectangle(x,y,220,62,0xfef3c7,1).setStrokeStyle(3,0xd97706).setInteractive({useHandCursor:true});
+      const t=scene.add.text(x,y,label,{fontFamily:FONT,fontSize:'17px',fontStyle:'bold',color:'#7c2d12',align:'center',wordWrap:{width:200}}).setOrigin(.5);
+      r.on('pointerover',()=>r.setFillStyle(0xfde68a)); r.on('pointerout',()=>r.setFillStyle(0xfef3c7));
+      r.on('pointerdown',()=>this.travel(id)); this.c.add([r,t]); this.buttons.push({id,r,t});
+    });
+    const close=scene.add.text(750,55,'✕',{fontFamily:FONT,fontSize:'26px',color:'#fff',backgroundColor:'#7f1d1d',padding:{x:8,y:3}}).setOrigin(.5).setInteractive({useHandCursor:true});
+    close.on('pointerdown',()=>this.toggle(false)); this.c.add(close);
+  }
+  toggle(force){ this.open=force===undefined?!this.open:force; this.c.setVisible(this.open); if(this.open){ this.refresh(); } }
+  refresh(){ this.buttons.forEach(b=>{ const here=b.id===this.scene.roomId; b.r.setFillStyle(here?0xfacc15:0xfef3c7); b.t.setText(`${here?'📍 ':''}${b.t.text.replace(/^📍 /,'')}`); }); }
+  travel(id){
+    if(!this.open||id===this.scene.roomId) return this.toggle(false);
+    const spawns={town:[12,10],field:[2.2,9.9],market:[2,10],riverside:[2,10],orchard:[2,10],mill:[2,10]};
+    this.toggle(false); this.scene.audio.sfx('door'); this.scene.goTo(id,spawns[id]||[12,10]);
+  }
+  update(){}
+}
+
+/* ============================================================
+   3. ROOM SCENE
+   ============================================================ */
+class RoomScene extends Phaser.Scene {
+  constructor(){ super('Room'); }
+  init(d){ this.roomId=d.room||'town'; this.spawn=d.spawn||[12,10]; this.state=this.registry.get('state'); this.audio=this.registry.get('audio'); }
+
+  create(){
+    const st=this.state, R=ROOMS[this.roomId], W=R.w*T, H=R.h*T;
+    this.ox=Math.max(0,(800-W)/2); this.oy=Math.max(0,(600-H)/2);
+    const P=(x,y)=>[this.ox+x*T,this.oy+y*T];
+    this.blocks=[]; this.sunflowers=[]; this.spr={}; this.busy=false; this.acting=false; this.act=null; this.born=this.time.now; this.grace=0; this.hm=null; this.houseWarned=false;
+    this.mayorMonster=st.mayorMonster; this.beatT=0; this.pillFlash=0;
+    this.nextVoice=Phaser.Math.Between(6000,12000);
+    this.cameras.main.setBackgroundColor(R.bg).fadeIn(400);
+
+    const data=[]; for(let y=0;y<R.h;y++){ const row=[]; for(let x=0;x<R.w;x++) row.push(R.tile(x,y)); data.push(row); }
+    const map=this.make.tilemap({data,tileWidth:T,tileHeight:T});
+    this.layer=map.createLayer(0,map.addTilesetImage('tiles','tiles',T,T,0,0),this.ox,this.oy); this.layer.setCollision([2,4]);
+    this.drawPaths(R);
+
+    const place=p=>{
+      const [x,y]=P(p.x,p.y);
+      if(p.k){ const s=this.add.image(x,y,p.k).setOrigin(.5,1).setDepth(y); this.spr[p.k]=s;
+        if(p.sway) this.tweens.add({targets:s,angle:{from:-2.5,to:2.5},duration:Phaser.Math.Between(1300,2300),delay:Math.random()*900,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
+        if(p.sf) this.sunflowers.push(s); }
+      if(p.b){ const r=this.add.rectangle(x,y-p.b[1]/2,p.b[0],p.b[1]).setVisible(false); this.physics.add.existing(r,true); this.blocks.push(r); }
+      return [x,y];
+    };
+    R.props.forEach(place);
+    this.triggers=R.triggers.map(d=>{
+      const t={...d};
+      if(d.npc){ [t.x,t.y]=P(d.x,d.y); t.sprite=this.add.sprite(t.x,t.y,'mayor_i0').setOrigin(.5,.96).play('mayor_idle'); }
+      else [t.x,t.y]=place(d);
+      if(d.icon){ t.iconObj=this.add.text(t.x,t.y-(d.ih||44),d.icon,{fontSize:'22px'}).setOrigin(.5).setDepth(8000);
+        if(!d.npc) this.tweens.add({targets:t.iconObj,y:t.iconObj.y-6,duration:600,yoyo:true,repeat:-1,ease:'Sine.easeInOut'}); }
+      return t;
+    });
+    this.mayor=this.triggers.find(t=>t.npc);
+    if(this.mayor) this.styleMayor();
+
+    // slow-burn set dressing
+    if(st.day>=2&&this.sunflowers[0]) this.sunflowers[0].setTint(0x8a8a5a).setScale(1,0.8);
+    if(st.day>=4) this.sunflowers.forEach((s,i)=>{ if(i%2) s.setTint(0x9a9a6a); });
+    if(st.day>=6){ if(this.spr.pond) this.spr.pond.setTint(0x7a1010); if(this.spr.scarecrow) this.spr.scarecrow.setTint(0x991b1b); }
+
+    const [sx,sy]=P(...this.spawn);
+    this.player=this.physics.add.sprite(sx,sy,'bob_d_i0').setOrigin(.5,.96).play('bob_idle_d');
+    this.player.body.setSize(14,10).setOffset(9,40); this.player.setCollideWorldBounds(true); this.facing='d';
+    this.physics.world.setBounds(this.ox,this.oy,W,H);
+    this.physics.add.collider(this.player,this.layer); this.physics.add.collider(this.player,this.blocks);
+    this.cameras.main.setBounds(0,0,Math.max(800,W),Math.max(600,H)).startFollow(this.player,true,0.15,0.15);
+
+    this.cursors=this.input.keyboard.createCursorKeys(); this.wasd=this.input.keyboard.addKeys('W,A,S,D');
+    this.keys=this.input.keyboard.addKeys({E:'E',SP:'SPACE',N1:'ONE',N2:'TWO',Q:'Q',T:'T',M:'M',ESC:'ESC'});
+    this.inverted=false;
+    this.time.addEvent({delay:1500,loop:true,callback:()=>{ this.inverted=Math.random()<this.state.params.controlInvertChance; }});
+
+    this.checklist=new ChecklistUI(this,st); this.mapUI=new WorldMapUI(this,st); this.dlg=new Dialogue(this,this.keys);
+    this.prompt=this.add.text(0,0,'',{fontSize:'14px',color:'#fff',backgroundColor:'#000a',padding:{x:5,y:3}}).setDepth(8500).setVisible(false).setOrigin(.5);
+    const hud=(x,y,txt,sz,ox=1)=>this.add.text(x,y,txt,{fontFamily:FONT,fontSize:sz,color:'#fff',stroke:'#000',strokeThickness:4}).setScrollFactor(0).setDepth(9000).setOrigin(ox,0);
+    hud(788,10,`Day ${st.day}`,'22px'); hud(788,38,R.name,'14px'); hud(788,58,'🧠 SANITY','12px');
+    this.pillText=hud(788,96,'','13px');
+    hud(400,592,'Move: Arrows/WASD   Interact: E   Pill: Q   Tasks: T / click   Map: M / button',' 12px',.5).setOrigin(.5,1);
+    this.bars=this.add.graphics().setScrollFactor(0).setDepth(9000); this.actBar=this.add.graphics().setDepth(8600);
+
+    this.grade=this.add.rectangle(0,0,800,600,0x8a9a6a).setOrigin(0).setScrollFactor(0).setDepth(8800).setBlendMode(Phaser.BlendModes.MULTIPLY);
+    this.vignette=this.add.image(0,0,'vignette').setOrigin(0).setScrollFactor(0).setDepth(8801);
+    this.dark=this.add.rectangle(0,0,800,600,0x000000).setOrigin(0).setScrollFactor(0).setDepth(8802);
+    this.noise=this.add.rectangle(0,0,800,600,0xffffff).setOrigin(0).setScrollFactor(0).setDepth(8803).setAlpha(0);
+
+    // house monster timer: none on Days 1-2, shadow on 3-5, real monster 6-7
+    this.houseLimit=this.roomId==='house'&&st.day>=3?(st.phase===3?25000:42000):0;
+  }
+
+  drawPaths(R){
+    const g=this.add.graphics().setDepth(6);
+    const px=(x,y,w,h,color=0xf0d58a)=>{g.fillStyle(color,1).fillRect(this.ox+x*T,this.oy+y*T,w*T,h*T);};
+    if(['town','field','market','riverside','orchard','mill'].includes(this.roomId)){
+      px(1,9,23,1.8); // main east-west path
+      if(this.roomId==='town'){ px(10,9,1.2,8); px(10,16.2,3,1.8); } // market path
+      if(this.roomId==='field'){ px(12,9,1.2,8); px(22,9,1.2,8); px(12,16,3,1.8); px(22,16,3,1.8); }
+      if(this.roomId==='riverside'){ px(23,9,2,1.8); px(23,7,1.2,5); }
+      if(this.roomId==='orchard'){ px(12,7,1.2,3); px(19,10,1.2,5); }
+      if(this.roomId==='mill'){ px(15,9,1.2,6); px(15,14,5,1.8); }
+    }
+    g.setAlpha(.72);
+  }
+
+  styleMayor(){
+    const s=this.mayor.sprite, d=this.state.day;
+    if(this.mayorMonster) this.makeMonster(); else if(d>=5) s.setScale(0.95,1.12); else if(d>=3) s.setScale(1,1.04);
+  }
+  makeMonster(){ const s=this.mayor.sprite; s.stop(); s.setTexture('monster').setScale(1).setRotation(0);
+    this.tweens.add({targets:s,scaleY:1.06,duration:500,yoyo:true,repeat:-1}); }
+  onFx(fx){ if(fx==='monster'){ this.state.mayorMonster=this.mayorMonster=true; this.makeMonster(); this.audio.sfx('roar'); this.cameras.main.shake(700,0.02); this.cameras.main.flash(400,255,0,0); } }
+
+  /* ---------- helpers ---------- */
+  goTo(room,spawn,onMid){
+    if(this.busy) return; this.busy=true; this.player.setVelocity(0); this.cameras.main.fadeOut(350,0,0,0);
+    this.cameras.main.once('camerafadeoutcomplete',()=>{ if(onMid) onMid(); this.scene.restart({room,spawn}); });
+  }
+  flash(msg){ const t=this.add.text(this.player.x,this.player.y-60,msg,{fontSize:'15px',color:'#fff',stroke:'#000',strokeThickness:3}).setOrigin(.5).setDepth(8600);
+    this.tweens.add({targets:t,y:t.y-24,alpha:0,duration:1000,onComplete:()=>t.destroy()}); }
+  voice(txt){
+    const big=this.state.phase===3;
+    const t=this.add.text(400,big?290:490,txt,{fontFamily:'Georgia, serif',fontSize:big?'34px':'22px',fontStyle:'italic',color:big?'#ff2a2a':'#d8d8e8',stroke:'#000',strokeThickness:5,align:'center',wordWrap:{width:700}})
+      .setOrigin(.5).setScrollFactor(0).setDepth(9400).setAlpha(0);
+    this.audio.sfx('whisper'); if(big&&Math.random()<0.4) this.audio.sfx('sting');
+    this.tweens.add({targets:t,alpha:big?1:0.85,duration:900,yoyo:true,hold:big?1800:1500,onComplete:()=>t.destroy()});
+    if(big) this.tweens.add({targets:t,x:{from:394,to:406},duration:60,yoyo:true,repeat:45});
+  }
+  takePill(){
+    const st=this.state, now=performance.now();
+    if(now<st.pillReadyAt) return this.flash(`Wait ${Math.ceil((st.pillReadyAt-now)/1000)}s`);
+    st.pillReadyAt=now+15000; st.addSanity(22); this.audio.sfx('pill'); this.flash('💊 Sanity +22');
+  }
+  finish(task){
+    if(!this.state.completeTask(task.id)) return;
+    this.audio.sfx('success'); this.flash(['Yay!','Done.','...'][this.state.phase-1]);
+    if(this.state.phase===3&&Math.random()<0.4) this.voice(Phaser.Utils.Array.GetRandom(VOICE_SEVERE));
+  }
+
+  /* ---------- interaction ---------- */
+  interact(t){
+    const st=this.state, task=st.tasks.find(k=>k.trigger===t.id&&!st.done.has(k.id));
+    if(t.type==='door'){ this.audio.sfx('door'); return this.goTo(t.to,t.spawn); }
+    if(t.type==='bed'){
+      if(!st.allDone()) return this.flash('Still things to do!');
+      if(st.day>=7){ this.busy=true; this.cameras.main.fadeOut(1200,0,0,0); return this.cameras.main.once('camerafadeoutcomplete',()=>this.scene.start('End')); }
+      return this.goTo('house',[7,7.2],()=>st.nextDay());
+    }
+    if(t.id==='mayor'){
+      // Talking to Barnaby must NEVER advance the day or clear the checklist.
+      // Snapshot the completed task IDs so dialogue cannot accidentally reset progress.
+      const completedBeforeTalk=new Set(st.done);
+      this.dlg.open(MAYOR_TALK[st.day],()=>{
+        completedBeforeTalk.forEach(id=>st.done.add(id));
+        if(task) this.finish(task);
+        this.grace=this.time.now+3500;
+        this.checklist.refresh();
+      });
+      return;
+    }
+    if(t.id==='board'){
+      this.dlg.open([{who:'📋 Notice Board',text:BOARD[st.phase-1]}],()=>{ if(task) this.finish(task); }); return;
+    }
+    if(t.type==='explore'){
+      this.startExplore(t);
+      return;
+    }
+    if(t.id==='basket'){                       // only 1 in 4 apples is good
+      return this.startAction(t,()=>{
+        const good=Math.random()<0.25; this.audio.sfx('crunch'); this.audio.sfx(good?'good':'bad');
+        st.addSanity(good?12:-10); this.flash(good?'🍎 Sweet! Sanity +12':'🍎 Rotten... Sanity -10');
+        if(task) this.finish(task);
+      });
+    }
+    if(task) return this.startAction(t,()=>this.finish(task));
+    this.flash('Nothing to do here.');
+  }
+
+  startExplore(t){
+    if(this.busy||this.acting) return;
+    this.acting=true; this.player.setVelocity(0);
+    const oldScale=this.player.scale;
+    this.tweens.add({targets:this.player,scale:oldScale*1.12,duration:180,yoyo:true,ease:'Sine.easeInOut'});
+    const pulse=this.add.circle(t.x,t.y,10,0xfacc15,0.35).setDepth(8700);
+    this.tweens.add({targets:pulse,scale:4,alpha:0,duration:850,onComplete:()=>pulse.destroy()});
+    const msg={
+      marketFountain:'The fountain is older than the town records.',
+      marketStallA:'Someone left a warm loaf here. Nobody is around.',
+      marketStallB:'The flowers are tied with tiny yellow ribbons.',
+      river:'The river sounds almost like someone humming.',
+      bridge:'The bridge is sturdy. For now.',
+      orchardTrees:'The oldest trees have names carved into them.',
+      orchardPath:'The path disappears behind the trees.',
+      millWheel:'The mill wheel is turning, but there is no wind.',
+      millCreek:'The creek carries little paper boats downstream.'
+    }[t.id]||'You found something interesting.';
+    this.flash(msg);
+    this.audio.sfx('good');
+    const task=this.state.tasks.find(k=>k.trigger===t.id&&!this.state.done.has(k.id));
+    if(task) this.finish(task);
+    this.time.delayedCall(850,()=>{this.acting=false;});
+  }
+
+  /* ---------- task animations: Bob works for a moment, effects play, then the task completes ---------- */
+  fxText(e,x,y,size='22px'){ return this.add.text(x,y,e,{fontSize:size}).setOrigin(.5).setDepth(8700); }
+  startAction(t,onDone){
+    const a=ACTIONS[t.id]; if(!a) return onDone();
+    const bloody=this.state.phase===3&&a.kind!=='throw'&&a.kind!=='sweep', e=bloody?'🩸':a.e, R=Phaser.Math.Between, px=this.player.x, py=this.player.y;
+    this.acting=true; this.player.setVelocity(0); this.act={t0:this.time.now,ms:a.ms};
+    const dx=t.x-px; if(Math.abs(dx)>10){ this.facing='s'; this.player.setFlipX(dx<0); } else this.facing=t.y<py?'u':'d';
+    const work=this.tweens.add({targets:this.player,scaleY:0.9,scaleX:1.06,angle:{from:-2,to:2},duration:130,yoyo:true,repeat:-1});
+    const junk=[], target=this.spr[t.k]||t.sprite;
+    if(a.kind==='sweep'){ const br=this.fxText('🧹',t.x-16,t.y-22,'26px'); junk.push(br);
+      this.tweens.add({targets:br,angle:{from:-35,to:35},duration:170,yoyo:true,repeat:-1});
+      if(target) this.tweens.add({targets:target,angle:{from:-6,to:6},duration:120,yoyo:true,repeat:-1}); }
+    const spark=()=>{
+      if(a.kind==='throw'){ const s=this.fxText(e,px,py-30,'24px');
+        this.tweens.add({targets:s,x:t.x,duration:a.ms*0.6,ease:'Sine.easeInOut'});
+        this.tweens.add({targets:s,y:t.y-24,angle:360,duration:a.ms*0.6,ease:'Back.easeIn',onComplete:()=>{ s.destroy(); this.tweens.add({targets:target||this.player,angle:{from:-8,to:8},duration:70,yoyo:true,repeat:3}); }}); }
+      else if(a.kind==='rain'){ const s=this.fxText(e,t.x+R(-46,46),t.y-84); this.tweens.add({targets:s,y:s.y+58,alpha:0,duration:520,onComplete:()=>s.destroy()}); }
+      else if(a.kind==='scatter'){ const s=this.fxText(e,px,py-26,'18px'), x=t.x+R(-34,34), y=t.y-R(2,20);
+        this.tweens.add({targets:s,x,y,angle:180,duration:420,onComplete:()=>{ s.destroy();
+          const r=this.add.ellipse(x,y,6,3).setStrokeStyle(2,bloody?0x7a1010:0xffffff).setFillStyle(0xffffff,0).setDepth(8700);
+          this.tweens.add({targets:r,scale:6,alpha:0,duration:600,onComplete:()=>r.destroy()}); }}); }
+      else if(a.kind==='rise'){ const s=this.fxText(e,t.x+R(-16,16),t.y-36); this.tweens.add({targets:s,y:s.y-46,alpha:0,scale:1.5,duration:850,onComplete:()=>s.destroy()}); }
+      else if(a.kind==='sweep'){ const s=this.fxText('✨',t.x+R(-24,24),t.y-R(10,60),'16px'); this.tweens.add({targets:s,y:s.y-20,alpha:0,duration:600,onComplete:()=>s.destroy()}); }
+    };
+    spark(); const ev=this.time.addEvent({delay:a.kind==='throw'?99999:150,loop:true,callback:spark});
+    this.time.delayedCall(a.ms,()=>{
+      work.remove(); ev.remove(); junk.forEach(o=>o.destroy()); if(target) target.setAngle(0);
+      this.player.setScale(1); this.player.setAngle(0); this.acting=false; this.act=null; if(this.busy) return;
+      for(let i=0;i<7;i++){ const s=this.fxText(bloody?'🩸':'⭐',t.x,t.y-30,'18px'), an=i/7*Math.PI*2;
+        this.tweens.add({targets:s,x:t.x+Math.cos(an)*36,y:t.y-30+Math.sin(an)*36,alpha:0,duration:650,onComplete:()=>s.destroy()}); }
+      onDone();
+    });
+  }
+  drawAct(time){
+    const g=this.actBar; g.clear(); if(!this.act) return;
+    const f=Math.min(1,(time-this.act.t0)/this.act.ms), x=this.player.x-22, y=this.player.y-64;
+    g.fillStyle(0x000000,0.65).fillRoundedRect(x-2,y-2,48,10,4); g.fillStyle(this.state.phase===3?0xef4444:0xfacc15,1).fillRoundedRect(x,y,44*f,6,3);
+  }
+
+  /* ---------- horror events ---------- */
+  spawnHouseMonster(){
+    const st=this.state, big=st.phase===3, [x,y]=[this.ox+3*T,this.oy+4.5*T];
+    this.hm=this.add.sprite(x,y,big?'monster':'shadow').setOrigin(.5,.96).setDepth(y);
+    this.audio.sfx(big?'roar':'creak'); this.cameras.main.shake(500,0.012);
+    this.voice(big?'IT FOUND YOU.':'Something is in the house.');
+  }
+  triggerEscapeCutscene(){
+    if(this.busy || this.scene.isActive('EscapeCutscene')) return;
+    this.busy=true; this.player.setVelocity(0); this.scene.start('EscapeCutscene');
+  }
+  forceOut(){
+    this.audio.sfx('sting'); this.cameras.main.flash(300,255,255,255);
+    this.triggerEscapeCutscene();
+  }
+
+  /* ---------- main loop ---------- */
+  applyParams(){
+    const p=this.state.params;
+    this.grade.setAlpha(p.desaturation); this.vignette.setAlpha(Math.min(1,p.desaturation*1.2)); this.dark.setAlpha(p.lightingDarkness*0.6);
+  }
+  drawHud(){
+    const st=this.state, s=st.sanity/100, low=s<0.3, jx=low?Phaser.Math.FloatBetween(-1.5,1.5):0, g=this.bars;
+    g.clear(); g.fillStyle(0x000000,0.65).fillRoundedRect(624,72,168,20,6);
+    g.fillStyle(s>0.5?0x4ade80:s>0.25?0xfacc15:0xef4444,1).fillRoundedRect(628+jx,76,160*s,12,4);
+    const now=performance.now(), rem=st.pillReadyAt-now;
+    this.pillText.setText(rem>0?`💊 ${Math.ceil(rem/1000)}s`:'💊 Ready [Q]').setColor(rem>0?'#f87171':'#86efac');
+    if(rem>0){ g.fillStyle(0x000000,0.65).fillRoundedRect(690,114,102,8,3); g.fillStyle(0xa78bfa,1).fillRoundedRect(690,114,102*(1-rem/15000),8,3); }
+  }
+  update(time,delta){
+    const st=this.state, p=st.params, dt=delta/1000;
+    this.applyParams(); this.drawHud(); this.checklist.update(time); this.drawAct(time);
+    if(this.dlg.active){ this.player.setVelocity(0); this.animate(0,0); this.dlg.update(); return; }
+    this.mapUI.update();
+    if(this.mapUI.open){ this.player.setVelocity(0); this.animate(0,0); return; }
+
+    // sanity drain, low-sanity effects
+    if(!this.busy){
+      st.sanity=Math.max(0,st.sanity-DRAIN[st.day-1]*dt);
+      if(st.sanity<=0){ this.flash('Bob blacks out...'); this.triggerEscapeCutscene(); }
+    }
+    if(st.sanity<30&&(this.beatT-=delta)<=0){ this.beatT=1000; this.audio.sfx('beat'); if(st.sanity<15) this.cameras.main.shake(120,0.003); }
+    if(Phaser.Input.Keyboard.JustDown(this.keys.Q)&&!this.busy) this.takePill();
+    if(Phaser.Input.Keyboard.JustDown(this.keys.T)) this.checklist.toggle();
+    if(Phaser.Input.Keyboard.JustDown(this.keys.M)) this.mapUI.toggle();
+    if(Phaser.Input.Keyboard.JustDown(this.keys.ESC)&&this.mapUI.open) this.mapUI.toggle(false);
+
+    // voices in Bob's head (Days 3+; much more frequent and vicious after Day 5)
+    if(st.phase>=2&&!this.busy&&(this.nextVoice-=delta)<=0){
+      this.voice(Phaser.Utils.Array.GetRandom(st.phase===3?VOICE_SEVERE:VOICE_MILD));
+      this.nextVoice=(st.phase===3?Phaser.Math.Between(7000,14000):Phaser.Math.Between(18000,32000))*(0.6+0.4*st.sanity/100);
+    }
+
+    // movement
+    const k=this.cursors, w=this.wasd, sp=140;
+    let vx=(k.right.isDown||w.D.isDown?1:0)-(k.left.isDown||w.A.isDown?1:0), vy=(k.down.isDown||w.S.isDown?1:0)-(k.up.isDown||w.W.isDown?1:0);
+    if(this.inverted){ vx=-vx; vy=-vy; } if(this.busy||this.acting){ vx=vy=0; }
+    this.player.setVelocity(vx*sp,vy*sp); if(vx&&vy) this.player.body.velocity.normalize().scale(sp);
+    this.animate(vx,vy);
+
+    this.triggers.forEach(t=>{ if(t.iconObj&&t.type==='task') t.iconObj.setVisible(st.tasks.some(k=>k.trigger===t.id&&!st.done.has(k.id))); });
+
+    // nearest trigger / auto doors
+    let near=null,best=46;
+    for(const t of this.triggers){
+      const d=D(this.player.x,this.player.y,t.x,t.y);
+      if(t.auto&&d<30&&time-this.born>700&&!this.busy&&!this.acting) return this.interact(t);
+      if(!t.auto&&d<best){ best=d; near=t; }
+    }
+    this.prompt.setVisible(!!near&&!this.busy&&!this.acting);
+    if(near){ this.prompt.setPosition(near.x,near.y-(near.ih||34)-22).setText('[E] '+near.label);
+      if(Phaser.Input.Keyboard.JustDown(this.keys.E)&&!this.busy&&!this.acting) this.interact(near); }
+
+    // Mayor: Day 5 creeps toward you; once transformed he hunts you
+    if(this.mayor){
+      const m=this.mayor, d=D(m.x,m.y,this.player.x,this.player.y), ang=Phaser.Math.Angle.Between(m.x,m.y,this.player.x,this.player.y);
+      let spd=0; if(this.mayorMonster) spd=st.day===6?60:92; else if(p.npcFollowSpeed>0) spd=Math.min(p.npcFollowSpeed,30);
+      if(!this.busy&&spd&&d>(this.mayorMonster?20:70)){ m.x+=Math.cos(ang)*spd*dt; m.y+=Math.sin(ang)*spd*dt; m.sprite.setPosition(m.x,m.y); }
+      if(this.mayorMonster) m.sprite.setFlipX(this.player.x<m.x); else if(p.desaturation>0.5) m.sprite.rotation=ang+Math.PI/2;
+      m.sprite.setDepth(m.y); if(m.iconObj) m.iconObj.setPosition(m.x,m.y-m.ih+Math.sin(time/250)*4);
+      if(this.mayorMonster&&!this.busy&&d<30&&time>this.grace){
+        this.triggerEscapeCutscene(); }
+    }
+    if(this.spr.scarecrow&&p.desaturation>0.35) this.spr.scarecrow.setAngle(Phaser.Math.Clamp((this.player.x-this.spr.scarecrow.x)/8,-14,14));
+
+    // house monster: spawns if you linger, forces you out
+    if(this.houseLimit&&!this.hm){
+      if(!this.houseWarned&&time-this.born>this.houseLimit*0.7){ this.houseWarned=true; this.audio.sfx('creak'); this.voice("You've been here too long."); }
+      if(time-this.born>this.houseLimit) this.spawnHouseMonster();
+    }
+    if(this.hm&&!this.busy){
+      const h=this.hm, a=Phaser.Math.Angle.Between(h.x,h.y,this.player.x,this.player.y), s=(st.phase===3?105:70)*dt;
+      h.x+=Math.cos(a)*s; h.y+=Math.sin(a)*s; h.setDepth(h.y).setFlipX(this.player.x<h.x);
+      if(D(h.x,h.y,this.player.x,this.player.y)<28) this.forceOut();
+    }
+
+    // visual noise
+    this.noise.setAlpha(p.phase===3?Phaser.Math.FloatBetween(0,0.06):0);
+    if(p.phase>=2) this.dark.setAlpha(p.lightingDarkness*0.6*(Math.random()<0.02?1.5:1));
+  }
+  animate(vx,vy){
+    if(vx||vy){ this.facing=Math.abs(vx)>=Math.abs(vy)?'s':(vy>0?'d':'u'); if(vx) this.player.setFlipX(vx<0); }
+    if(this.facing!=='s') this.player.setFlipX(false);
+    const key=`bob_${vx||vy?'walk':'idle'}_${this.facing}`;
+    if(this.player.anims.currentAnim?.key!==key) this.player.play(key);
+    this.player.setDepth(this.player.y);
+  }
+}
+
+/* ============================================================ BOOT */
+const state=new CorruptionManager();
+const game=new Phaser.Game({
+  type:Phaser.AUTO,width:800,height:600,backgroundColor:'#87ceeb',physics:{default:'arcade'},scene:[TitleScene,RoomScene,EscapeCutscene,EndScene],
+  callbacks:{preBoot:g=>{ g.registry.set('state',state); g.registry.set('audio',new Sound(state)); }},
+});
+// Debug: hold SHIFT + 1-7 to jump to a day (plain 1/2 are reserved for dialogue choices)
+window.addEventListener('keydown',e=>{
+  const m=/^Digit([1-7])$/.exec(e.code);
+  if(m&&e.shiftKey&&game.scene.isActive('Room')){
+    state.day=+m[1]; state.done.clear(); state.sanity=100; state.mayorMonster=state.day>=7;
+    game.scene.getScene('Room').scene.restart({room:'town',spawn:[12,10]});
+  }
+  if((e.key==='-'||e.code==='Minus')&&game.scene.isActive('Room')){
+    state.day=10; state.done.clear(); state.sanity=100; state.mayorMonster=true;
+    game.scene.getScene('Room').scene.restart({room:'town',spawn:[12,10]});
+  }
+});
+</script>
+</body>
+</html>
