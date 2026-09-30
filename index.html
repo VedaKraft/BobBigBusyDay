@@ -13,202 +13,265 @@ const FONT = 'Comic Sans MS, cursive';
 const D = Phaser.Math.Distance.Between;
 
 /* ============================================================
-   PACING  -  7 days.
-   Days 1-2 cute | Days 3-5 MILD scary | Days 6-7 VERY scary
+   PACING - 10 days, horror spread evenly:
+   phase 1 (D1-2) cute | 2 (D3-4) mild | 3 (D5-7) MID | 4 (D8-10) severe
+   Barnaby transforms on Day 7; from then on town is a timed hunt.
    ============================================================ */
-const LEVELS = [0, 0.04, 0.12, 0.22, 0.34, 0.50, 0.66, 0.78, 0.90, 1.0];   // base corruption per day
-const DRAIN  = [0, 0, 0.18, 0.28, 0.38, 0.55, 0.72, 0.88, 1.05, 1.25];    // sanity lost per second
+const LEVELS = [0, 0.04, 0.12, 0.24, 0.40, 0.52, 0.64, 0.76, 0.88, 1.0];
+const DRAIN  = [0, 0, 0.16, 0.24, 0.34, 0.46, 0.60, 0.75, 0.92, 1.10];
+const CAPS   = [0.2, 0.45, 0.75, 1];
 
 /* ============================================================
-   TASKS
+   TASKS  (trigger = id of a world object, see ROOMS)
    ============================================================ */
 const K = (id,icon,text,trigger,corruptText)=>({id,icon,text,trigger,corruptText});
-const EAT = K('eat','🍳','Make Breakfast','kitchen');
+const TK = (id,icon,text,corrupt)=>K(id,icon,text,id,corrupt);   // talk tasks: trigger id == npc id
+const EAT=K('eat','🍳','Make Breakfast','kitchen'), MAIL=K('mail','✉️',"Mail Bob's Letter",'mailbox'), WATER=K('water','🌻','Water the Sunflowers','flowers'),
+  MAYOR=K('mayor','🎩','Say Hello to Mayor Barnaby','mayor'), BOARD=K('board','📋','Read the Notice Board','board'), LIB=K('lib','📚','Return a Library Book','shelf'),
+  SCARE=K('scare','🧹','Fix the Scarecrow','scarecrow'), WELL=K('well','🪣','Fetch Water','well'), DUCK=K('duck','🦆','Feed the Ducks','pond'),
+  ESCP=K('mayor','🎩','Escape Barnaby (leave town alive)','mayor','RUN.');
 const DAYS = {
-  1: [EAT, K('mail','✉️',"Mail Bob's Letter",'mailbox'), K('water','🌻','Water the Sunflowers','flowers'),
-      K('duck','🦆','Feed the Ducks','pond'), K('mayor','🎩','Say Hello to Mayor Barnaby','mayor')],
-  2: [EAT, K('board','📋','Read the Notice Board','board'), K('mail','✉️',"Mail Bob's Letter",'mailbox'),
-      K('water','🌻','Water the Sunflowers','flowers'), K('lib','📚','Return a Library Book','shelf'),
-      K('mayor','🎩','Say Hello to Mayor Barnaby','mayor')],
-  3: [EAT, K('apple','🍎','Pick an Apple','basket','Pick an Apple (only some are good)'), K('desk','📖','Check Out a Book','desk'),
-      K('scare','🧹','Fix the Scarecrow','scarecrow'), K('well','🪣','Fetch Water','well'),
-      K('mayor','🎩','Say Hello to Mayor Barnaby','mayor')],
-  4: [EAT, K('board','📋','Read the Notice Board','board'), K('duck','🦆','Feed the Ducks','pond'),
-      K('mail','✉️','Find the Missing Letter','mailbox'), K('water','🌻','Water the Sunflowers','flowers'),
-      K('mayor','🎩','Say Hello to Mayor Barnaby','mayor',"Don't let him notice you.")],
-  5: [EAT, K('scare','🧹','Fix the Scarecrow','scarecrow'), K('lib','📚','Return a Library Book','shelf'),
-      K('well','🪣','Fetch Water','well'), K('mail','✉️',"Mail Bob's Letter",'mailbox'),
-      K('mayor','🎩','Say Hello to Mayor Barnaby','mayor','He is smiling wider.')],
-  6: [K('eat','🍳','Eat Something (if you can)','kitchen','Eat. Eat. EAT.'), K('board','📋','Tear Down the Notices','board',"Don't read them."),
-      K('water','🌻','Drain the Sunflowers','flowers','D̷r̸a̵i̶n̷ ̸i̴t̷'), K('lib','📚','Barricade the Library','shelf','▓▒░ ▒░▓▓░'),
-      K('mayor','🎩','Face Mayor Barnaby','mayor','HE IS WAITING.')],
-  7: [K('mail','✉️','Take the Letter Back','mailbox','GO TO BED'), K('water','🌻','Dig Under the Sunflowers','flowers','THEY ARE UNDER HERE'),
-      K('duck','🦆','Drain the Pond','pond','IT ISN\'T WATER'), K('desk','📖','Burn the Library Card','desk','░░░░░░'),
-      K('mayor','🎩','End It With Barnaby','mayor','RUN.')],
-  8: [K('market','🥖','Buy a Loaf at the Market','marketStallA','The stall is open. Too open.'), K('river','🌊','Listen to the Riverside','river','The river is saying your name.'),
-      K('bridge','🌉','Cross the Old Bridge','bridge','Do not look down.'), K('orchard','🍎','Pick the Red Apple','orchardTrees','It is still warm.'), K('mayor','🎩','Ask Barnaby About the Mill','mayor','He already knows.')],
-  9: [K('mill','⚙️','Inspect the Mill Wheel','millWheel','It is turning by itself.'), K('creek','💧','Follow the Creek','millCreek','The water runs backwards.'),
-      K('path','🥾','Follow the Orchard Path','orchardPath','Something followed you here.'), K('fountain','⛲','Check the Market Fountain','marketFountain','There is no reflection.'), K('mayor','🎩','Find Barnaby','mayor','He is everywhere.')],
-  10:[K('market','🛒','Search the Empty Market','marketStallB','Nothing is being sold anymore.'), K('river','🌊','Cross the Riverside','river','The river has stopped.'),
-      K('mill','⚙️','Stop the Mill','millWheel','STOP IT BEFORE IT SEES YOU.'), K('orchard','🍎','Reach the End of the Path','orchardPath','KEEP RUNNING.'), K('mayor','🎩','Confront Barnaby','mayor','RUN.')],
+  1:[EAT,MAIL,WATER,DUCK,K('bread','🥖','Buy Bread at the Market','bakery'),MAYOR],
+  2:[EAT,BOARD,MAIL,LIB,TK('colin','😎','Chat with Colin the Cool'),TK('brenda','🥧','Say Hi to Brenda'),TK('lucy','👓','Ask Lucy for a Book Tip')],
+  3:[EAT,K('apple','🍎','Pick an Apple','basket','Pick an Apple (some are bad)'),K('desk','📖','Check Out a Book','desk'),SCARE,TK('pip','🍏','Visit Pip in the Orchard'),TK('gus','🎣','Chat with Gus by the River'),MAYOR],
+  4:[EAT,BOARD,K('fish','🎣','Go Fishing','fishing'),TK('colin','😎','Chat with Colin the Cool'),TK('wanda','🌾','Visit Wanda at the Mill'),TK('brenda','🥖',"Get Brenda's Fresh Bread"),MAYOR],
+  5:[EAT,SCARE,K('hive','🐝','Check the Beehive','hive'),TK('pip','🍏','Visit Pip in the Orchard'),TK('gus','🎣','Check on Gus'),TK('lucy','👓','Visit Lucy at the Library'),MAYOR],
+  6:[EAT,WATER,WELL,TK('colin','😎','Check on Colin','He is standing so still.'),TK('wanda','🌾','Check on Wanda'),TK('brenda','🥖','Check on Brenda','Her door is locked.'),K('mayor','🎩','Talk to Mayor Barnaby','mayor','HE IS SMILING.')],
+  7:[K('mail','✉️','Take the Letter Back','mailbox','GO TO BED'),K('water','🌻','Drain the Sunflowers','flowers','D̷r̸a̵i̶n̷ ̸i̴t̷'),K('desk','📖','Burn the Library Card','desk','░░░░░░'),K('grain','🌾','Hide the Grain Sacks','grain','They are moving.'),
+     TK('brenda','🥖','Warn Brenda','Too late.'),TK('gus','🎣','Warn Gus','He is not listening.'),K('mayor','🎩','Face Mayor Barnaby','mayor','HE IS WAITING.')],
+  8:[TK('brenda','🥖','Find Brenda','She stopped answering.'),K('river','🌊','Listen to the River','river','It says your name.'),K('bridge','🌉','Cross the Old Bridge','bridge','Do not look down.'),
+     K('orchard','🍎','Pick the Red Apple','orchardTrees','It is still warm.'),TK('pip','🍏','Find Old Pip','Where is he?'),TK('wanda','🌾','Find Wanda','The mill is grinding.'),ESCP],
+  9:[K('mill','⚙️','Inspect the Mill Wheel','millWheel','It turns by itself.'),K('path','🥾','Walk the Orchard Path','orchardPath','Something followed you.'),K('fountain','⛲','Check the Market Fountain','fountain','No reflection.'),
+     TK('pip','🍏',"Look for Pip's Hat"),TK('gus','🎣','Look for Gus'),TK('brenda','🥖','Check on Brenda'),ESCP],
+  10:[K('bread','🥖','Search the Bakery','bakery','Nothing is being sold.'),TK('brenda','🥖','Find Brenda','DO NOT LOOK.'),K('river','🌊','Cross the River','bridge','KEEP MOVING.'),
+      K('mill','⚙️','Stop the Mill','millWheel','STOP IT BEFORE IT SEES YOU.'),TK('wanda','🌾','Look for Wanda'),K('path','🥾','Reach the End of the Path','orchardPath','KEEP RUNNING.'),ESCP],
 };
 
 /* ============================================================
-   DIALOGUE + VOICES  (all the story text lives here)
+   STORY TEXT
    ============================================================ */
 const M=(text,x={})=>({who:'Mayor Barnaby',text,...x}), B=text=>({who:'Bob',text});
+const Nl=who=>(text,x={})=>({who,text,...x}), br=Nl('Brenda the Baker'), co=Nl('Colin the Cool'), pi=Nl('Old Pip'), gu=Nl('Gus the Fisher'), wa=Nl('Wanda the Miller'), lu=Nl('Lucy the Librarian');
 const MAYOR_TALK = {
   1:[M('Well hello there, Bob! What a lovely, lovely morning!'),B('Good morning, Mayor Barnaby!'),
-     M('Have you watered the sunflowers yet?',{ask:['Not yet!','Almost done!'],then:[[M("No rush! They'll wait for you. They always do.")],[M("Splendid! You're the best neighbor a town could ask for!")]]}),
-     M('Now off you go! Busy, busy, busy!')],
+     M('Have you watered the sunflowers yet?',{ask:['Not yet!','Almost done!'],then:[[M("No rush! They'll wait for you. They always do.")],[M("Splendid! You're the best neighbor a town could ask for!")]]}),M('Now off you go! Busy, busy, busy!')],
   2:[M('Morning, Bob! Sleep well?',{ask:['Great!','I heard noises...'],then:[[M('Wonderful! Sleep is very important.')],[M("Noises? Ha ha! Just the town settling. Nothing to worry about.")]]}),
-     B('Where is everybody today?'),M("Everybody? ...Ha ha! Silly Bob. It's just you and me. It's always been just you and me."),M('Busy, busy, busy!')],
+     B('Where is everybody today?'),M("Oh, around! Brenda's baking, Colin's being cool, Pip's up with his apples, Lucy's shushing somebody. Busy, busy, busy!"),M('You should visit them. People like being visited.')],
   3:[M("Bob! You're up early. ...Or late? Time is funny like that."),B('Are you feeling okay, Mayor?'),
-     M('Splendid! Have an apple from the field. Only some of them are good.',{ask:['Which ones?','No thanks.'],then:[[M("That's the fun part, Bob. You never know until you bite.")],[M("Manners, Bob. You'll take one eventually.")]]}),
-     M("And do be nice to the scarecrow. He doesn't like being ignored.")],
+     M('Splendid! Have an apple from the field. Only some of them are good.',{ask:['Which ones?','No thanks.'],then:[[M("That's the fun part, Bob. You never know until you bite.")],[M("Manners, Bob. You'll take one eventually.")]]}),M("And do be nice to the scarecrow. He doesn't like being ignored.")],
   4:[M("You're doing so well, Bob. So obedient! I mean... helpful. Helpful."),B('Did you say obedient?'),M('Did I? Ha. Ha. Ha.'),
      M('Every night I stand outside your window. Just to make sure you are safe.'),B('...Every night?'),M('Smile, Bob. You stopped smiling. It is very rude.')],
-  5:[M('Oh, Bob. Your letters were never delivered. Not once.'),B('Then who have I been mailing them to?'),M('Me. They were all for me. I was so hungry for them.'),
-     M("We don't leave, Bob. Nobody leaves. The town needs its Bob."),B('Your smile... it is too wide.'),M("Tomorrow, it will be wider.")],
-  6:[M('Bob... you look tired. Sit. Stay. Close your eyes.'),B("Mayor Barnaby, what's wrong with your face?"),
-     M("Nothing's wrong with my face. It's just... coming off.",{fx:'monster'}),
-     M("I'VE BEEN SO HUNGRY, BOB. THE SUNFLOWERS WERE ONLY FLOWERS. YOU ARE MEAT."),B('...Run.')],
-  7:[M('YOU CAME BACK. GOOD. THE TOWN FEEDS ON GOOD LITTLE BOBS.'),B('Every morning. I keep coming back.'),
-     M('SEVEN DAYS. SEVEN HUNDRED. I STOPPED COUNTING.'),B("Then I'll end it. All of it."),M('TRY.')],
+  5:[M('Oh, Bob. Your letters were never delivered. Not once.'),B('Then who have I been mailing them to?'),M('Me. They were all for me. I was so hungry for them.'),B('Hungry?'),
+     M('Figure of speech! Ha! ...Mostly.'),M("We don't leave, Bob. Nobody leaves. The town needs its Bob.")],
+  6:[M('Bob. Hold still. You have something on your shoulder.'),B('What is it?'),M("Oh... nothing. It's gone now. It gets bored so quickly."),B('Mayor, your hat is... moving.'),
+     M("It's just my hair, Bob. It has always been my hair. Ha ha ha ha ha."),M("Come back tomorrow. I'll have something to show you.")],
+  7:[M('Bob... you look tired. Sit. Stay. Close your eyes.'),B("Mayor Barnaby, what's wrong with your face?"),
+     M("Nothing's wrong with my face. It's just... coming off.",{fx:'monster'}),M("I'VE BEEN SO HUNGRY, BOB. THE SUNFLOWERS WERE ONLY FLOWERS. YOU ARE MEAT."),B('...Run.')],
 };
-const BOARD = [
-  'NOTICE: Town picnic on Saturday! Bring a sunflower! — Mayor B.',
-  'NOTICE: Please stop asking where everyone went. — Mayor B.',
-  'NOTICE: THERE IS NO SATURDAY. THERE IS NO EXIT. THERE IS ONLY BOB.',
-];
-const VOICE_MILD = ['Did you hear that?','Someone is standing behind you.','The apples are watching.','Why is it so quiet, Bob?',
-  "That wasn't the wind.","You've done this before.","Don't look at the scarecrow.",'Smile, Bob. Smile.','He knows your name.','Nobody else lives here.'];
-const VOICE_SEVERE = ['IT IS INSIDE THE WALLS.','You were never supposed to wake up.','Barnaby is hungry.','The town eats its Bobs.',
-  'They buried the others under the sunflowers.','We can hear you thinking.','Your face is not yours anymore.','Scream. No one is left to hear.',
-  'BEHIND YOU. BEHIND YOU.','Bob. Bob. Bob. Bob. Bob.','The sun is a lie.','Take the pill. Take the pill. It will not help.',
-  'Every morning you wake up a little less.','The house remembers where you sleep.'];
-
-const ACTIONS = {   // animation played while Bob does each task
-  mailbox:{e:'✉️',ms:900,kind:'throw'}, shelf:{e:'📕',ms:1100,kind:'throw'}, desk:{e:'📖',ms:1100,kind:'throw'}, basket:{e:'🍎',ms:700,kind:'throw'},
-  flowers:{e:'💧',ms:1500,kind:'rain'}, pond:{e:'🍞',ms:1300,kind:'scatter'}, kitchen:{e:'♨️',ms:1500,kind:'rise'},
-  well:{e:'💦',ms:1300,kind:'rise'}, scarecrow:{e:'🧹',ms:1400,kind:'sweep'},
+const MAYOR_SMALL = {1:['Busy, busy, busy!',"Isn't the weather splendid?",'I do love a tidy town.'],2:['Careful with the apples, Bob.','Did you hear that? ...No? Good.','Smile, Bob! Smile!'],3:['You are still here. Good. Stay.','I counted your footsteps today.','The town likes you. It told me so.']};
+const NPCS = {   // fate(day) -> ok | uneasy | hunted | shadow | dead | gone
+  brenda:{name:'Brenda the Baker',look:{skin:0xffcf9f,hair:0x7c2d12,shirt:0xf9a8d4,pants:0x92400e,extra:(g,b)=>{ g.fillStyle(0xffffff).fillRect(9,b+18,15,11).fillRect(9,b-6,15,6); }},fate:d=>d<=4?'ok':d<=7?'uneasy':d<=9?'hunted':'dead'},
+  colin:{name:'Colin the Cool',look:{skin:0xd9a066,hair:0x111827,shirt:0x14b8a6,pants:0x1f2937,extra:(g,b)=>{ g.fillStyle(0x000000).fillRect(9,b+4,15,4); }},fate:d=>d<=3?'ok':d<=7?'uneasy':'shadow'},
+  pip:{name:'Old Pip',left:'hat',look:{skin:0xe8b98a,hair:0xd1d5db,shirt:0x65a30d,pants:0x78350f,extra:(g,b)=>{ g.fillStyle(0xd97706).fillRect(6,b-4,21,3).fillRect(10,b-9,13,6); }},fate:d=>d<=4?'ok':d<=6?'uneasy':d<=8?'hunted':'gone'},
+  gus:{name:'Gus the Fisher',left:'rod',look:{skin:0xe0a878,hair:0x6b7280,shirt:0x0ea5e9,pants:0x374151,extra:(g,b)=>{ g.fillStyle(0xfacc15).fillRect(6,b-4,21,3).fillRect(10,b-9,13,6); }},fate:d=>d<=3?'ok':d<=6?'uneasy':d<=8?'hunted':'gone'},
+  wanda:{name:'Wanda the Miller',left:'gloves',look:{skin:0xffcf9f,hair:0x92400e,shirt:0xa78bfa,pants:0x57534e,extra:(g,b)=>{ g.fillStyle(0xf5f5f4).fillRect(9,b+18,15,11).fillRect(8,b-3,17,4); }},fate:d=>d<=5?'ok':d<=7?'uneasy':d<=9?'hunted':'gone'},
+  lucy:{name:'Lucy the Librarian',look:{skin:0xf5cba7,hair:0x1f2937,shirt:0x6366f1,pants:0x1e293b,extra:(g,b)=>{ g.fillStyle(0x111827).fillRect(9,b+3,6,4).fillRect(18,b+3,6,4).fillRect(15,b+4,3,2); }},fate:d=>d<=3?'ok':d<=5?'uneasy':d<=8?'hunted':'shadow'},
+};
+const TALK = {   // each fate has several conversations; the day picks one. Repeat visits use SMALL.
+  brenda:{ok:[[br('Bob! Fresh sourdough, still warm!'),B('It smells amazing, Brenda!'),br('Take a loaf. Everyone in town loves my bread!')],
+               [br('Morning, Bob! Cinnamon rolls today.'),B('Any secret ingredient?'),br('Love, butter, and a pinch of mystery. Ha!')],
+               [br('Colin says my bread makes him feel cool.'),B('Everything makes Colin feel cool.'),br('True! Tell him the rye is on me.')]],
+    uneasy:[[br('Bob... have you noticed the bread never goes stale anymore?'),br("I bake it. It sits. In the morning it's warm again.")],
+            [br('I keep finding little handprints in the flour.'),B('Yours?'),br('Too small to be mine. And upside down.')],
+            [br('The oven hums at night now. Like a lullaby.'),br("I don't remember teaching it the words.")]],
+    hunted:[[br("I locked the shutters. It looks in through the oven door, Bob."),br("Don't stand near the windows. Please."),br('Go. GO.')],
+            [br('It knocks three times on the oven. Then it knocks from the inside.'),br('Take the bread and run.')],
+            [br('Colin stopped blinking. Pip stopped answering.'),br("Bob, I'm next, aren't I?")]],
+    dead:[[{who:'Bob',text:'Brenda...? Where is her... head?',sanity:-18},B('...Oh no. Oh no no no.'),B("The oven is still warm. It's still warm.")]]},
+  colin:{ok:[[co('Yo, Bob! Looking cool today, my dude.'),B('Thanks Colin!'),co('Stay chill. Nothing bad ever happens in this town.')],
+             [co('Check out my new shades.'),B("They're the same shades."),co('New shine. Totally different vibe.')],
+             [co('Bob, life is like a fountain. Cool. Circular. Occasionally full of coins.'),B('Deep.'),co('I know. I contain multitudes.')]],
+    uneasy:[[co('Hey... you ever feel like someone is standing in your shadow?'),B('Only right now.'),co("Yeah. That's the thing. I can't shake mine off.")],
+            [co('My shadow moved before I did today.'),B('Maybe you were dizzy?'),co("Maybe. Or maybe it's practicing.")],
+            [co("I stopped wearing my shades. I don't want to see the dark parts."),B('What dark parts?'),co('The ones that look back.')]]},
+  pip:{ok:[[pi('Ah, young Bob! The apples are in early this year.'),B('They look delicious!'),pi('Best in the valley. Ha ha!')],
+           [pi("Bees are busy, apples are ripe. It's a good life, Bob."),B('Any advice?'),pi("Never eat an apple that's already been bitten.")],
+           [pi('My knees say rain. My knees are never wrong.'),B('It looks sunny.'),pi("That's what worries me.")]],
+    uneasy:[[pi("The trees whisper at night, Bob. They know the names of everyone who's gone."),pi("Gone? Oh. I mean... 'away'.")],
+            [pi('The path behind the orchard keeps growing.'),B('Growing?'),pi('An inch every night. Toward town.')],
+            [pi("Somebody's been picking apples at night. Only the bruised ones."),pi("I don't think it's for eating.")]],
+    hunted:[[pi("It walks between the rows at night, wearing Barnaby's hat."),pi("I hid my hat so it wouldn't find me."),pi('Tell them I tried.')],
+            [pi("Don't answer if the trees call your name."),pi('They only call once.')]],
+    gone:[[{who:'Bob',text:"Pip's hat. Still warm... and there is nothing left of him.",sanity:-10}]]},
+  gus:{ok:[[gu('Ahoy, Bob! The fish are biting today.'),B('Any big ones?'),gu('Just a story or two. Ha!')],
+           [gu('The trick to fishing is patience. And a really good lie.'),B('What lie?'),gu("That I'm not talking to the fish.")]],
+    uneasy:[[gu("The river's been quiet, Bob. No birds, no frogs."),gu('Just me and something breathing under the bridge.')],
+            [gu('Caught a boot yesterday. It had a name stitched inside. Yours.'),B('Mine?!'),gu('Ha! Kidding. ...Mostly.')]],
+    hunted:[[gu('I stopped fishing. Now the river fishes for me.'),gu("It's got a line in my ankle, Bob.")],
+            [gu('It hums when it is close. Hear that? Listen.'),gu("...No. Don't listen. Run.")]],
+    gone:[[{who:'Bob',text:"Gus's rod is still here, the line pulled taut... into the water.",sanity:-10}]]},
+  wanda:{ok:[[wa('Bob! Just in time. Fresh flour, ground this morning!'),B('How is the mill?'),wa('Turning like a dream. It never stops, that wheel.')],
+             [wa('Barnaby asks about the mill a lot these days.'),B('Why?'),wa('Says he likes the sound. Says it hides other sounds.')]],
+    uneasy:[[wa("The wheel turns even when the creek's dry."),B('How?'),wa("I stopped asking. The wheel doesn't like questions.")],
+            [wa("I find grain sacks in places I didn't put them."),wa('Heavy ones. Warm ones.')]],
+    hunted:[[wa('Something lives under the wheel now. I hear it chewing.'),wa('Take the flour. Take it. Leave.')],
+            [wa('The mill grinds all night. In the morning the flour is red.'),wa("Don't tell Barnaby I said that.")]],
+    gone:[[{who:'Bob',text:"Wanda's gloves, dusted with flour... and the wheel is still turning.",sanity:-10}]]},
+  lucy:{ok:[[lu('Shh! Welcome, Bob. Books are due in seven days.'),B('Any recommendation?'),lu("Anything with a happy ending. We're low on those.")],
+            [lu('Fun fact: this library has three thousand books.'),B('Wow!'),lu("And three thousand blank pages between them. Isn't that funny?")]],
+    uneasy:[[lu('Someone keeps returning books I never lent.'),B('Which ones?'),lu('All about you, Bob. In different handwriting.')],
+            [lu('The card catalog rearranges itself at night.'),lu("This morning every card said 'STAY'.")]],
+    hunted:[[lu("Don't read aloud in here. Something answers."),lu("I've stopped reading. It reads over my shoulder now.")],
+            [lu('The shelves are closer together than yesterday.'),lu('I think the library is closing in. Slowly. Politely.')]]},
+};
+const SMALL = {
+  brenda:{ok:['Try the rye, Bob!','Careful, the tray is hot!','Best loaf in town, guaranteed.'],uneasy:['Did you hear knocking?','The flour is moving on its own.',"Don't stay long, Bob."],hunted:['Shhh. It listens.','Leave. Please.','Lock your door tonight.'],dead:['Nothing but silence, flies, and the smell of warm bread.']},
+  colin:{ok:['Stay chill, Bob.','Cool. Cool cool cool.'],uneasy:["Don't look at the ground.",'It looks taller today.']},
+  pip:{ok:['Mind the bees!','Pick the red ones.'],uneasy:['The trees are listening.'],hunted:['Shh! Between the rows...'],gone:['Only the hat remains.']},
+  gus:{ok:['Bite, little fishy...','Patience, Bob.'],uneasy:['Hear that humming?'],hunted:["Don't stand near the water."],gone:['The line is still pulling.']},
+  wanda:{ok:['Mind the gears!','Fresh flour, fresh dreams.'],uneasy:["Don't touch the wheel."],hunted:['Shhh. It hears the gears.'],gone:['The wheel keeps turning.']},
+  lucy:{ok:['Shh...','Please return on time.'],uneasy:['Do you hear whispering?'],hunted:['Quiet. Please.']},
+};
+const BOARD_TXT = ['NOTICE: Town picnic on Saturday! Bring a sunflower! — Mayor B.','NOTICE: Please stop wandering after dark. The town gets lonely. — Mayor B.',
+  'NOTICE: Missing: one hat, one baker, several names. Ask no questions. — Mayor B.','NOTICE: THERE IS NO SATURDAY. THERE IS NO EXIT. THERE IS ONLY DEATH.'];
+const VOICE_MILD = ['I feel dizzy.','Did you hear that?','Someone is standing behind you.','The apples are watching.','Why is it so quiet, Bob?',"That wasn't the wind.","You've done this before.","Don't look at the scarecrow.",'Smile, Bob. Smile.','He knows your name.','The town is too quiet.'];
+const VOICE_MID = ['I don\'t feel my heart thumping.','The town is holding its breath.','Someone moved the furniture while you blinked.','Barnaby has been smiling for too long.','Did Colin always stand like that?','You are being counted.',"Don't turn around yet.",'The apples know your name.','It is getting closer to the house each night.'];
+const VOICE_SEVERE = ['IT IS INSIDE THE WALLS.','You were never supposed to wake up.','Barnaby is hungry.','The town eats its Bobs.','They buried the others under the sunflowers.','We can hear you thinking.',
+  'Your face is not yours anymore.','Scream. No one is left to hear.','BEHIND YOU. BEHIND YOU.','Bob. Bob. Bob. Bob. Bob.','The sun is a lie.','Take the pill. Take the pill. It will not help.', 'JUST STOP LIVING!!!'
+  , 'Every morning you wake up a little less.','The house remembers where you sleep.',"Brenda's oven is still warm.",'Colin is watching you.',"Where is Pip's hat, Bob?",'Lucy has stopped turning the pages.','The mill grinds red flour.','Gus is still fishing.','Wanda is gone.','The library is closing in.','The town is waiting for you to blink.'];
+const LORE = {   // [cute, dark]
+  bakery:['The bread is warm. Coins are optional.','The loaf has something written on the crust.'], florist:['Flowers tied with little yellow ribbons.','Every bouquet has a tag. All say "Bob".'],
+  fountain:['Coins wish for good things.','The coins are all teeth.'], river:['The river hums a gentle tune.','The river is humming your name.'],
+  bridge:['A sturdy bridge. Bob feels brave.','The planks are warm, like skin.'], fishing:['A little fish! Bob is proud.','Something huge nibbled... then pulled back.'],
+  lantern:['The lantern glows cozily.','The flame is looking at you.'], orchardTrees:['Ripe apples, sweet and crisp!','Every apple has a tiny bite mark.'],
+  orchardPath:['A quiet path through the trees.','The path is longer than yesterday.'], hive:['Busy bees! Honey soon.','The bees are spelling something.'],
+  millWheel:['The old wheel creaks gently.','The wheel turns without water.'], millCreek:['The creek is cool and clear.','The creek runs backwards.'],
+  grain:['Heavy sacks of grain.','One of the sacks moved.'],
+};
+const ACTIONS = {   // each task has its own animation kind (see startAction)
+  mailbox:{e:'✉️',ms:1000,kind:'throw'}, shelf:{e:'📕',ms:1100,kind:'throw'}, desk:{e:'📖',ms:1100,kind:'stamp'}, basket:{e:'🍎',ms:700,kind:'throw'},
+  bakery:{e:['🪙','🥖'],ms:1100,kind:'throw'}, fountain:{e:'🪙',ms:1200,kind:'throw'}, flowers:{e:'💧',ms:1600,kind:'water'}, pond:{e:'🍞',ms:1400,kind:'scatter'},
+  kitchen:{e:'♨️',ms:1600,kind:'cook'}, well:{e:'💦',ms:1600,kind:'bucket'}, fishing:{e:'🐟',ms:1800,kind:'cast'}, hive:{e:'🐝',ms:1500,kind:'orbit'},
+  lantern:{e:'✨',ms:1200,kind:'glow'}, scarecrow:{e:'🧹',ms:1500,kind:'sweep'}, orchardTrees:{e:'🍎',ms:1200,kind:'shake'}, orchardPath:{e:'👣',ms:1400,kind:'foot'},
+  bridge:{e:'👣',ms:1400,kind:'foot'}, river:{e:'🎵',ms:1500,kind:'rise'}, millWheel:{e:'⚙️',ms:1500,kind:'spin'}, millCreek:{e:'⛵',ms:1500,kind:'boat'}, grain:{e:'🌾',ms:1300,kind:'lift'},
 };
 
 /* ============================================================
-   ROOMS  (tiles; props/triggers anchored bottom-centre)
+   WORLD  -  every area has 25x19 tiles and connects through walk-through gaps.
+   Layout:        [Town] --- [Field] --- [Orchard]
+                    |          |
+                 [Market]   [Riverside] --- [Mill]
    ============================================================ */
 const border=(w,h,floor,edge,gate)=>(x,y)=>(x===0||y===0||x===w-1||y===h-1)&&!(gate&&gate(x,y))?edge:floor;
 const trees=pts=>pts.map(([x,y])=>({k:'tree',x,y,sway:true,b:[16,10]}));
+const rect=(a,b,c,d)=>(x,y)=>x>=a&&x<=c&&y>=b&&y<=d;
+const anyOf=(...f)=>(x,y)=>f.some(g=>g(x,y));
+const NAMES={town:'the Town',field:'the Sunflower Field',market:'Market Square',riverside:'the Riverside',orchard:'the Old Orchard',mill:'the Old Mill'};
+// gate centre, and where you ARRIVE in the next area (opposite edge)
+const DIR={E:{x:24.4,y:10,sp:[2,10],ic:'➡️'},W:{x:0.6,y:10,sp:[22.6,10],ic:'⬅️'},S:{x:13,y:18.4,sp:[13,2],ic:'⬇️'},N:{x:13,y:0.6,sp:[13,16.6],ic:'⬆️'}};
+function outdoor(o){
+  const gate=(x,y)=>(o.exit.E&&x===24&&(y===9||y===10))||(o.exit.W&&x===0&&(y===9||y===10))||(o.exit.S&&y===18&&(x===12||x===13))||(o.exit.N&&y===0&&(x===12||x===13));
+  const trig=[...o.triggers];
+  Object.entries(o.exit).forEach(([d,to])=>trig.push({id:'go'+d,label:'To '+NAMES[to],type:'door',auto:true,x:DIR[d].x,y:DIR[d].y,to,spawn:DIR[d].sp,icon:DIR[d].ic,ih:34}));
+  return {name:o.name,w:25,h:19,bg:o.bg||'#87ceeb',walls:o.walls||[],props:o.props,triggers:trig,tile:(x,y)=>border(25,19,0,2,gate)(x,y)===2?2:(o.path(x,y)?1:0)};
+}
+const SUN=[[14.6,6.4],[16,6],[17.4,6.4],[15.3,7.6],[16.7,7.6]].map(([x,y])=>({k:'sunflower',x,y,sway:true,sf:1}));
 const ROOMS = {
-  town:{ name:"Bob's Town", w:25,h:19, bg:'#87ceeb',
-    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===24&&y===9)(x,y)===2?2:(y===9||((x===5||x===19)&&y>=5&&y<=9))?1:0,
-    props:[{k:'house',x:5.5,y:5,b:[160,120]},{k:'library',x:19.5,y:5,b:[160,120]},
-           ...trees([[2,8],[9,3],[12,4],[14,3],[22,8],[2,14],[9,16],[16,15],[22,16],[13,14]])],
+  town:outdoor({name:"Bob's Town",exit:{E:'field',S:'market'},path:anyOf(rect(5,9,24,10),rect(12,9,13,18),rect(5,5,5,9),rect(19,5,19,9)),
+    props:[{k:'house',x:5.5,y:5,b:[160,120]},{k:'library',x:19.5,y:5,b:[160,120]},...trees([[2,8],[9,3],[12,3],[15,3],[22,8],[2,14],[8,16],[17,15],[22,16],[16,12]])],
     triggers:[
       {id:'mailbox',label:'Mailbox',k:'mailbox',type:'task',x:8.5,y:8.6,icon:'✉️',b:[10,8]},
-      {id:'well',label:'Well',k:'well',type:'task',x:11.5,y:7.4,icon:'🪣',b:[40,16]},
+      {id:'well',label:'Well',k:'well',type:'task',x:10.5,y:7.6,icon:'🪣',b:[40,16]},
       {id:'board',label:'Notice Board',k:'board',type:'task',x:15.5,y:8.6,icon:'📋',b:[40,10]},
-      {id:'enterHouse',label:"Enter Bob's House",type:'door',x:5.5,y:5.7,icon:'🏠',ih:60,to:'house',spawn:[7,7.2]},
-      {id:'enterLib',label:'Enter Library',type:'door',x:19.5,y:5.7,icon:'📚',ih:60,to:'library',spawn:[8,8.2]},
-      {id:'mayor',label:'Mayor Barnaby',npc:true,type:'task',x:14,y:12.5,icon:'🎩',ih:62},
-      {id:'toField',label:'The Field',type:'door',auto:true,x:24.2,y:9.9,to:'field',spawn:[2.2,9.9]},
-      {id:'toMarket',label:'Market Square',type:'door',x:10.5,y:16.8,icon:'🛒',ih:42,to:'market',spawn:[2,10]},
-    ]},
-  field:{ name:'The Sunflower Field', w:25,h:19, bg:'#87ceeb',
-    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===0&&y===9)(x,y)===2?2:(y===9&&x<10)?1:0,
-    props:[...trees([[3,3],[9,3],[12,2],[20,3],[23,5],[3,16],[8,17],[20,16],[23,13],[12,16]]),
-           {k:'pond',x:5.5,y:7,b:[84,22]},
-           {k:'sunflower',x:14.6,y:9.2,sway:true,sf:1},{k:'sunflower',x:16,y:8.8,sway:true,sf:1},
-           {k:'sunflower',x:17.4,y:9.2,sway:true,sf:1},{k:'sunflower',x:15.3,y:10.4,sway:true,sf:1},{k:'sunflower',x:16.7,y:10.4,sway:true,sf:1}],
+      {id:'enterHouse',label:"Enter Bob's House",type:'door',x:5.5,y:5.7,icon:'🏠',ih:42,to:'house',spawn:[7,7.2]},
+      {id:'enterLib',label:'Enter Library',type:'door',x:19.5,y:5.7,icon:'📚',ih:42,to:'library',spawn:[8,8.2]},
+      {id:'mayor',label:'Mayor Barnaby',npc:true,type:'task',x:15,y:13,icon:'🎩'},
+      {id:'colin',label:'Colin the Cool',npcId:'colin',type:'task',x:8.5,y:13,icon:'😎'},
+    ]}),
+  field:outdoor({name:'The Sunflower Field',exit:{W:'town',E:'orchard',S:'riverside'},path:anyOf(rect(0,9,24,10),rect(12,9,13,18)),
+    props:[...trees([[3,3],[9,3],[11,2],[20,3],[23,5],[3,16],[8,17],[19,16],[23,13],[16,15]]),{k:'pond',x:5.5,y:7,b:[84,22]},...SUN],
     triggers:[
-      {id:'toTown',label:'Back to Town',type:'door',auto:true,x:0.3,y:9.9,to:'town',spawn:[22.6,9.9]},
-      {id:'flowers',label:'Sunflowers',type:'task',x:16,y:11.6,icon:'🌻',ih:20},
-      {id:'pond',label:'Duck Pond',type:'task',x:5.5,y:8.2,icon:'🦆',ih:40},
-      {id:'scarecrow',label:'Scarecrow',k:'scarecrow',type:'task',x:22,y:8.4,icon:'🧹',ih:74,b:[12,10]},
-      {id:'basket',label:'Apple Basket (E: eat one)',k:'basket',type:'task',x:20.5,y:13,icon:'🍎',b:[24,10]},
-      {id:'toRiver',label:'Riverside',type:'door',x:12.5,y:16.8,icon:'🌊',ih:42,to:'riverside',spawn:[2,10]},
-      {id:'toOrchard',label:'Old Orchard',type:'door',x:22.5,y:16.8,icon:'🍎',ih:42,to:'orchard',spawn:[2,10]},
-    ]},
-  market:{ name:'Market Square', w:25,h:19, bg:'#8fd3ff',
-    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===0&&y===9)(x,y)===2?2:(y===9||x===12)?1:0,
-    props:[...trees([[3,4],[21,4],[3,15],[21,15]]),
-      {k:'fountain',x:12.5,y:8.2,b:[78,28]},{k:'stall',x:6,y:6,b:[110,50]},{k:'stall',x:19,y:6,b:[110,50]}],
+      {id:'flowers',label:'Sunflowers',type:'task',x:16,y:8.6,icon:'🌻',ih:150},
+      {id:'pond',label:'Duck Pond',type:'task',x:5.5,y:8.2,icon:'🦆',over:'pond'},
+      {id:'scarecrow',label:'Scarecrow',k:'scarecrow',type:'task',x:21.5,y:7,icon:'🧹',b:[12,10]},
+      {id:'basket',label:'Apple Basket (E: eat one)',k:'basket',type:'task',x:20.5,y:13.5,icon:'🍎',b:[24,10]},
+    ]}),
+  market:outdoor({name:'Market Square',bg:'#8fd3ff',exit:{N:'town'},path:anyOf(rect(12,0,13,10),rect(5,9,20,10)),
+    props:trees([[3,4],[21,4],[3,15],[21,15],[8,14]]),
     triggers:[
-      {id:'toTownMarket',label:'Back to Town',type:'door',auto:true,x:0.3,y:9.9,to:'town',spawn:[22.6,9.9]},
-      {id:'marketFountain',label:'Look at the Fountain',type:'explore',x:12.5,y:8.2,icon:'⛲',ih:42},
-      {id:'marketStallA',label:'Browse the Bakery Stall',type:'explore',x:6,y:7.3,icon:'🥖',ih:48},
-      {id:'marketStallB',label:'Browse the Flower Stall',type:'explore',x:19,y:7.3,icon:'💐',ih:48},
-    ]},
-  riverside:{ name:'Quiet Riverside', w:25,h:19, bg:'#83c9f4',
-    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===0&&y===9)(x,y)===2?2:(y===9||y===10)?1:0,
-    props:[...trees([[3,3],[8,4],[20,3],[22,15],[5,16],[14,15]]),
-      {k:'river',x:12.5,y:9.2,b:[690,48]},{k:'bridge',x:12.5,y:9.2,b:[110,58]}],
+      {id:'bakery',label:'Bakery Stall',k:'stall',type:'task',x:6,y:6.6,icon:'🥖',b:[110,46]},
+      {id:'florist',label:'Flower Stall',k:'stall',type:'task',x:19,y:6.6,icon:'💐',b:[110,46]},
+      {id:'brenda',label:'Brenda the Baker',npcId:'brenda',type:'task',x:9,y:8,icon:'🥖'},
+      {id:'fountain',label:'Fountain',k:'fountain',type:'task',x:13,y:15,icon:'⛲',b:[70,24]},
+    ]}),
+  riverside:outdoor({name:'Quiet Riverside',bg:'#83c9f4',exit:{N:'field',E:'mill'},path:anyOf(rect(12,0,13,18),rect(12,9,24,10)),
+    walls:[[0,12,11,1.75],[14,12,11,1.75]],
+    props:[...trees([[3,3],[7,4],[19,3],[22,6],[4,16],[9,16],[20,15]]),{k:'river',x:12.5,y:13.75,d:4},{k:'bridge',x:12.5,y:13.9,d:5}],
     triggers:[
-      {id:'toFieldRiver',label:'Back to Field',type:'door',auto:true,x:0.3,y:9.9,to:'field',spawn:[22.6,9.9]},
-      {id:'river',label:'Watch the River',type:'explore',x:17,y:7.1,icon:'🌊',ih:44},
-      {id:'bridge',label:'Cross the Bridge',type:'explore',x:12.5,y:9.2,icon:'🌉',ih:48},
-      {id:'toMill',label:'Old Mill',type:'door',x:23.7,y:9.9,icon:'⚙️',ih:42,to:'mill',spawn:[2,10]},
-    ]},
-  orchard:{ name:'Old Orchard', w:25,h:19, bg:'#8fd8a2',
-    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===0&&y===9)(x,y)===2?2:(y===9||x===12)?1:0,
-    props:[...trees([[3,3],[7,5],[17,4],[22,3],[4,15],[9,14],[18,15],[22,12]]),
-      {k:'basket',x:12.5,y:7,b:[30,20]}],
+      {id:'river',label:'Listen to the River',type:'task',x:19,y:11.3,icon:'🌊',ih:34},
+      {id:'bridge',label:'Cross the Bridge',type:'task',x:13,y:13,icon:'🌉',ih:44},
+      {id:'fishing',label:'Go Fishing',type:'task',x:22.5,y:11.3,icon:'🎣',ih:34},
+      {id:'gus',label:'Gus the Fisher',npcId:'gus',type:'task',x:15.5,y:11.2,icon:'🎣'},
+      {id:'lantern',label:'Lantern',type:'task',x:18,y:16.5,icon:'🏮',ih:34},
+    ]}),
+  orchard:outdoor({name:'Old Orchard',bg:'#8fd8a2',exit:{W:'field'},path:anyOf(rect(0,9,13,10),rect(12,4,13,14),rect(12,13,21,14)),
+    props:trees([[3,3],[6,6],[20,6],[22,3],[4,15],[8,14],[22,10],[9,4],[19,17]]),
     triggers:[
-      {id:'toFieldOrchard',label:'Back to Field',type:'door',auto:true,x:0.3,y:9.9,to:'field',spawn:[22.6,9.9]},
-      {id:'orchardTrees',label:'Inspect the Apple Trees',type:'explore',x:12.5,y:7,icon:'🍎',ih:42},
-      {id:'orchardPath',label:'Follow the Old Path',type:'explore',x:20,y:12,icon:'🥾',ih:42},
-    ]},
-  mill:{ name:'Old Mill', w:25,h:19, bg:'#a8d8e8',
-    tile:(x,y)=>border(25,19,0,2,(x,y)=>x===0&&y===9)(x,y)===2?2:(y===9||x===15)?1:0,
-    props:[...trees([[3,4],[6,15],[21,4],[22,15]]),{k:'mill',x:15,y:7,b:[150,120]}],
+      {id:'orchardTrees',label:'Apple Tree',k:'tree',type:'task',x:10.5,y:6.4,icon:'🍎',b:[16,10]},
+      {id:'pip',label:'Old Pip',npcId:'pip',type:'task',x:9.5,y:12,icon:'🍏'},
+      {id:'hive',label:'Beehive',k:'hive',type:'task',x:17,y:8,icon:'🐝',b:[24,12]},
+      {id:'orchardPath',label:'Follow the Old Path',type:'task',x:20.5,y:15.2,icon:'🥾',ih:34},
+    ]}),
+  mill:outdoor({name:'Old Mill',bg:'#a8d8e8',exit:{W:'riverside'},path:anyOf(rect(0,9,15,10),rect(15,7,16,10)),
+    props:[...trees([[3,4],[6,15],[21,4],[22,15],[9,3]]),{k:'creek',x:20,y:13.4,d:4}],
     triggers:[
-      {id:'toRiverMill',label:'Back to Riverside',type:'door',auto:true,x:0.3,y:9.9,to:'riverside',spawn:[22.6,9.9]},
-      {id:'millWheel',label:'Inspect the Mill',type:'explore',x:15,y:7,icon:'⚙️',ih:70},
-      {id:'millCreek',label:'Follow the Creek',type:'explore',x:20,y:12,icon:'💧',ih:44},
-    ]},
-  house:{ name:"Bob's House", w:14,h:10, bg:'#1a1024', tile:border(14,10,3,4), props:[],
+      {id:'millWheel',label:'The Mill',k:'mill',type:'task',x:15.5,y:7,icon:'⚙️',b:[150,104]},
+      {id:'millCreek',label:'Follow the Creek',type:'task',x:20,y:12.3,icon:'💧',ih:34},
+      {id:'grain',label:'Grain Sacks',k:'sack',type:'task',x:10.5,y:12.5,icon:'🌾',b:[20,10]},
+      {id:'wanda',label:'Wanda the Miller',npcId:'wanda',type:'task',x:11.5,y:7.8,icon:'🌾'},
+    ]}),
+  house:{name:"Bob's House",w:14,h:10,bg:'#1a1024',tile:border(14,10,3,4),props:[],walls:[],
     triggers:[
-      {id:'bed',label:'Go to Sleep',k:'bed',type:'bed',x:2.5,y:3.2,icon:'🛏️',ih:56,b:[64,30]},
-      {id:'kitchen',label:'Kitchen Table',k:'table',type:'task',x:9,y:5,icon:'🍳',ih:44,b:[48,20]},
+      {id:'bed',label:'Go to Sleep',k:'bed',type:'bed',x:2.5,y:3.2,icon:'🛏️',b:[64,30]},
+      {id:'kitchen',label:'Kitchen Table',k:'table',type:'task',x:9,y:5,icon:'🍳',b:[48,20]},
       {id:'exitHouse',label:'Leave House',k:'mat',type:'door',x:7,y:8.9,to:'town',spawn:[5.5,6.6]},
     ]},
-  library:{ name:'Town Library', w:16,h:11, bg:'#1a1024', tile:border(16,11,3,4),
+  library:{name:'Town Library',w:16,h:11,bg:'#1a1024',tile:border(16,11,3,4),walls:[],
     props:[{k:'shelf',x:3,y:2.1,b:[96,40]},{k:'shelf',x:13,y:2.1,b:[96,40]},{k:'table',x:5,y:6,b:[48,20]}],
     triggers:[
-      {id:'shelf',label:'Bookshelf',k:'shelf',type:'task',x:8,y:2.1,icon:'📚',ih:70,b:[96,40]},
-      {id:'desk',label:'Checkout Desk',k:'table',type:'task',x:11,y:6,icon:'📖',ih:44,b:[48,20]},
+      {id:'shelf',label:'Bookshelf',k:'shelf',type:'task',x:8,y:2.1,icon:'📚',b:[96,40]},
+      {id:'desk',label:'Checkout Desk',k:'table',type:'task',x:11,y:6,icon:'📖',b:[48,20]},
+      {id:'lucy',label:'Lucy the Librarian',npcId:'lucy',type:'task',x:11,y:4.6,icon:'👓'},
       {id:'exitLib',label:'Leave Library',k:'mat',type:'door',x:8,y:9.9,to:'town',spawn:[19.5,6.6]},
     ]},
 };
 
+const TRIG_ROOM={}; Object.entries(ROOMS).forEach(([rid,r])=>r.triggers.forEach(t=>{ if(t.type!=='door') TRIG_ROOM[t.id]=rid; }));
+const MAPNAME={town:'Town',house:"Bob's House",library:'Library',field:'Sunflower Field',orchard:'Old Orchard',market:'Market Square',riverside:'Riverside',mill:'Old Mill'};
+
 /* ============================================================
-   1. CORRUPTION MANAGER  (day, sanity, derived parameters)
+   CORRUPTION MANAGER
    ============================================================ */
 class CorruptionManager extends Phaser.Events.EventEmitter {
-  constructor(){ super(); this.day=1; this.done=new Set(); this.sanity=100; this.pillReadyAt=0; this.mayorMonster=false; }
+  constructor(){ super(); this.day=1; this.done=new Set(); this.sanity=100; this.pillReadyAt=0; this.mayorMonster=false; this.talked={}; this.uiOpen=false; }
   get tasks(){ return DAYS[this.day]; }
   get progress(){ return this.done.size/this.tasks.length; }
-  get phase(){ return this.day<=2?1:this.day<=5?2:3; }
-  // Low sanity pushes visuals harsher, but never past "mild" until Day 6.
-  get corruptionLevel(){
-    const c=LEVELS[this.day-1]+this.progress*0.05+(1-this.sanity/100)*0.2;
-    return Math.min(this.day<=5?0.6:1,c);
-  }
+  get phase(){ const d=this.day; return d<=2?1:d<=4?2:d<=7?3:4; }
+  get corruptionLevel(){ const c=LEVELS[this.day-1]+this.progress*0.05+(1-this.sanity/100)*0.2; return Math.min(CAPS[this.phase-1],c); }
   get params(){
     const c=this.corruptionLevel, lerp=Phaser.Math.Linear;
-    return { musicPitch:lerp(1,0.6,c), uiJitterAmount:c<0.3?0:lerp(0,6,c), npcFollowSpeed:c<0.5?0:lerp(0,90,(c-0.5)*2),
-      lightingDarkness:lerp(0,0.8,c), desaturation:c, controlInvertChance:this.day>=7?0.2:0, phase:this.phase };
+    return {musicPitch:lerp(1,0.6,c),uiJitterAmount:c<0.3?0:lerp(0,6,c),npcFollowSpeed:c<0.35?0:lerp(0,90,(c-0.35)/0.65),lightingDarkness:lerp(0,0.8,c),desaturation:c,
+      controlInvertChance:this.day>=8?0.2:this.day>=6?0.08:0,phase:this.phase};
   }
   addSanity(d){ this.sanity=Phaser.Math.Clamp(this.sanity+d,0,100); }
   completeTask(id){ if(this.done.has(id)) return false; this.done.add(id); this.emit('task',id); return true; }
   allDone(){ return this.done.size>=this.tasks.length; }
-  nextDay(){ this.day=Math.min(10,this.day+1); this.done.clear(); this.sanity=Math.min(100,this.sanity+35); this.mayorMonster=this.day>=7; }
+  resetDay(){ this.done.clear(); this.talked={}; this.mayorMonster=this.day>=8; }
+  nextDay(){ this.day=Math.min(10,this.day+1); this.sanity=Math.min(100,this.sanity+35); this.resetDay(); }
 }
 
 /* ============================================================
-   SOUND  (all synthesized with Web Audio - no asset files needed)
-   Generative music: pentatonic ukulele plucks that slow down, detune,
-   drop notes and hit wrong notes as corruption rises; drone fades in.
+   SOUND (all synthesized)
    ============================================================ */
 class Sound {
   constructor(state){ this.state=state; this.ctx=null; this.step=0; this.pos=3; }
@@ -224,8 +287,7 @@ class Sound {
   tone(f,d,type='sine',v=0.2,to=null,dest=null,when=0){
     const c=this.ctx; if(!c) return; const t=c.currentTime+when, o=c.createOscillator(), g=c.createGain();
     o.type=type; o.frequency.setValueAtTime(f,t); if(to) o.frequency.exponentialRampToValueAtTime(to,t+d);
-    g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(0.0001,t+d);
-    o.connect(g); g.connect(dest||this.out); o.start(t); o.stop(t+d+0.05);
+    g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(0.0001,t+d); o.connect(g); g.connect(dest||this.out); o.start(t); o.stop(t+d+0.05);
   }
   noise(d,v=0.2,f=1000,q=1,type='bandpass'){
     const c=this.ctx; if(!c) return; const n=(c.sampleRate*d)|0, b=c.createBuffer(1,n,c.sampleRate), a=b.getChannelData(0);
@@ -238,11 +300,8 @@ class Sound {
     const st=this.state, c=st.corruptionLevel;
     this.mel.frequency.value=7000-6200*c; this.dg.gain.value=c*c*0.14;
     const scale=[0,2,4,7,9,12,14,16]; this.step++; this.pos=Phaser.Math.Clamp(this.pos+Phaser.Math.Between(-2,2),0,7);
-    if(!(c>0.45&&Math.random()<c-0.35)){
-      let semi=scale[this.pos]; if(c>0.5&&Math.random()<c) semi+=1;         // wrong notes
-      this.tone(261.6*Math.pow(2,(semi+(Math.random()-.5)*c*4)/12),0.5,'triangle',0.16,null,this.mel);
-    }
-    if(st.day===1&&this.step%4===0) this.tone(130.8,0.6,'sine',0.15);         // bassline only on Day 1
+    if(!(c>0.45&&Math.random()<c-0.35)){ let semi=scale[this.pos]; if(c>0.5&&Math.random()<c) semi+=1; this.tone(261.6*Math.pow(2,(semi+(Math.random()-.5)*c*4)/12),0.5,'triangle',0.16,null,this.mel); }
+    if(st.day===1&&this.step%4===0) this.tone(130.8,0.6,'sine',0.15);
     setTimeout(()=>this.loop(),260+520*c);
   }
   sfx(n){
@@ -260,6 +319,9 @@ class Sound {
       case 'sting': this.tone(466,0.9,'sawtooth',0.14); this.tone(494,0.9,'sawtooth',0.14); this.tone(70,0.9,'square',0.2,40); break;
       case 'beat': this.tone(60,0.18,'sine',0.5,35); this.tone(60,0.18,'sine',0.35,35,null,0.2); break;
       case 'door': this.noise(0.25,0.3,300,1,'lowpass'); break;
+      case 'splash': this.noise(0.35,0.35,1500,1); break;
+      case 'ding': this.tone(1320,0.5,'sine',0.15); this.tone(1760,0.4,'sine',0.08,null,null,0.05); break;
+      case 'sizzle': this.noise(0.9,0.25,6000,0.7,'highpass'); break;
       case 'branch': this.noise(0.22,0.45,900,2); this.tone(120,0.18,'sawtooth',0.12,70); break;
       case 'heartbeat': this.tone(65,0.16,'sine',0.55,45); this.tone(65,0.16,'sine',0.38,45,null,0.24); break;
       case 'scream': this.noise(1.25,0.8,1500,2); this.tone(880,0.9,'sawtooth',0.28,180); this.tone(440,1.0,'square',0.16,90); break;
@@ -268,46 +330,37 @@ class Sound {
 }
 
 /* ============================================================
-   2. CHECKLIST UI
+   CHECKLIST (dropdown: click header or press T)
    ============================================================ */
 class ChecklistUI {
   constructor(scene,state){
-    this.scene=scene; this.state=state; this.rows=[]; this.open=state.uiOpen===true; state.uiOpen=this.open;
-    const f={fontFamily:FONT};
-    // header = the dropdown toggle (click it, or press T)
-    this.head=scene.add.rectangle(12,12,250,28,0xfbbf24,0.97).setOrigin(0).setScrollFactor(0).setDepth(9000)
-      .setStrokeStyle(4,0xf2b705).setInteractive({useHandCursor:true});
+    this.scene=scene; this.state=state; this.rows=[]; this.open=state.uiOpen===true; const f={fontFamily:FONT};
+    this.head=scene.add.rectangle(12,12,290,28,0xfbbf24,0.97).setOrigin(0).setScrollFactor(0).setDepth(9000).setStrokeStyle(4,0xf2b705).setInteractive({useHandCursor:true});
     this.head.on('pointerdown',()=>this.toggle());
     this.title=scene.add.text(22,17,'',{...f,fontSize:'16px',color:'#7c2d12',fontStyle:'bold'}).setScrollFactor(0).setDepth(9001);
     this.body=scene.add.container(12,40).setScrollFactor(0).setDepth(9000).setVisible(this.open);
-    this.body.add(scene.add.rectangle(0,0,250,10+state.tasks.length*26,0xfff3a0,0.95).setOrigin(0).setStrokeStyle(4,0xf2b705));
+    this.body.add(scene.add.rectangle(0,0,290,10+state.tasks.length*26,0xfff3a0,0.95).setOrigin(0).setStrokeStyle(4,0xf2b705));
     state.tasks.forEach((t,i)=>{
-      const box=scene.add.text(10,6+i*26,'☐',{fontSize:'18px',color:'#333'});
-      const txt=scene.add.text(34,7+i*26,'',{...f,fontSize:'14px',color:'#333',wordWrap:{width:205}});
+      const box=scene.add.text(10,6+i*26,'☐',{fontSize:'18px',color:'#333'}), txt=scene.add.text(34,7+i*26,'',{...f,fontSize:'14px',color:'#333',wordWrap:{width:245}});
       this.body.add([box,txt]); this.rows.push({task:t,box,txt,i,checked:state.done.has(t.id),glitchUntil:0,flipUntil:0});
     });
-    this.onTask=id=>this.setStatus(id,true); state.on('task',this.onTask);
-    scene.events.once('shutdown',()=>state.off('task',this.onTask));
-    this.refresh();
+    this.onTask=id=>this.setStatus(id,true); state.on('task',this.onTask); scene.events.once('shutdown',()=>state.off('task',this.onTask)); this.refresh();
   }
   toggle(){ this.open=!this.open; this.state.uiOpen=this.open; this.body.setVisible(this.open); this.refresh(); }
-  setStatus(id,done){ const r=this.rows.find(r=>r.task.id===id); if(!r) return; r.checked=done; this.refresh();
-    if(done&&this.state.corruptionLevel<0.5) this.starBurst(r.i); }
+  setStatus(id,done){ const r=this.rows.find(r=>r.task.id===id); if(!r) return; r.checked=done; this.refresh(); if(done&&this.state.corruptionLevel<0.5) this.starBurst(r.i); }
   refresh(){
     const c=this.state.corruptionLevel, now=this.scene.time.now; let done=0;
     this.rows.forEach(r=>{
       const bad=r.task.corruptText&&(c>=0.75||now<r.glitchUntil), shown=now<r.flipUntil?!r.checked:r.checked; if(r.checked) done++;
       r.txt.setText(bad?r.task.corruptText:`${r.task.icon} ${r.task.text}`); r.txt.setColor(bad&&c>0.7?'#991b1b':'#333'); r.box.setText(shown?'☑':'☐');
     });
-    const n=this.rows.length, pend=this.rows.filter(r=>!r.checked).map(r=>r.task.icon).join('');
-    this.title.setText(this.open?`📋 TASKS  ${done}/${n}   ▲`:`📋 TASKS  ${done}/${n}  ▼`);
+    this.title.setText(`📋 TASKS  ${done}/${this.rows.length}   ${this.open?'▲':'▼'}`);
   }
-  starBurst(i){ const s=this.scene.add.text(40,this.open?46+i*26:26,'★',{fontSize:'28px',color:'#f59e0b'}).setScrollFactor(0).setDepth(9002);
-    this.scene.tweens.add({targets:s,scale:3,alpha:0,duration:500,onComplete:()=>s.destroy()}); }
+  starBurst(i){ const s=this.scene.add.text(40,this.open?46+i*26:26,'★',{fontSize:'28px',color:'#f59e0b'}).setScrollFactor(0).setDepth(9002); this.scene.tweens.add({targets:s,scale:3,alpha:0,duration:500,onComplete:()=>s.destroy()}); }
   update(time){
-    const p=this.state.params, c=this.state.corruptionLevel, j=p.uiJitterAmount;
+    const c=this.state.corruptionLevel, j=this.state.params.uiJitterAmount;
     this.rows.forEach(r=>{ r.txt.x=34+(j?Phaser.Math.FloatBetween(-j,j)*0.4:0); r.txt.y=r.box.y+1+(j?Phaser.Math.FloatBetween(-j,j)*0.4:0); });
-    if(c>=0.4&&Math.random()<0.003*(1+c*3)){      // glitches are only VISUAL and always revert
+    if(c>=0.4&&Math.random()<0.003*(1+c*3)){
       const r=Phaser.Utils.Array.GetRandom(this.rows);
       if(Math.random()<0.5) r.flipUntil=time+Phaser.Math.Between(700,1800); else r.glitchUntil=time+Phaser.Math.Between(600,2000);
       this.refresh(); this.scene.time.delayedCall(2000,()=>this.refresh());
@@ -316,7 +369,7 @@ class ChecklistUI {
 }
 
 /* ============================================================
-   DIALOGUE BOX  (typewriter, blips, branching choices via 1 / 2)
+   DIALOGUE BOX
    ============================================================ */
 class Dialogue {
   constructor(sc,keys){
@@ -329,17 +382,15 @@ class Dialogue {
     this.c.add([this.bg,this.nm,this.tx,this.hint]);
   }
   open(lines,onEnd){
-    this.q=[...lines]; this.onEnd=onEnd; this.active=true; this.c.setVisible(true);
-    const bad=this.sc.state.phase===3; this.bg.setFillStyle(bad?0x1a0708:0xfff8dc,0.97).setStrokeStyle(5,bad?0x7f1d1d:0x92400e); this.tx.setColor(bad?'#ff5555':'#222');
-    this.next();
+    this.q=[...(lines||[])]; this.onEnd=onEnd; this.active=true; this.c.setVisible(true);
+    const bad=this.sc.state.phase>=4; this.bg.setFillStyle(bad?0x1a0708:0xfff8dc,0.97).setStrokeStyle(5,bad?0x7f1d1d:0x92400e); this.tx.setColor(bad?'#ff5555':'#222'); this.next();
   }
   next(){
     if(!this.q.length){ this.active=false; this.c.setVisible(false); if(this.onEnd) this.onEnd(); return; }
     const l=this.cur=this.q.shift(); this.nm.setText(l.who); this.full=l.text; this.i=0; this.choosing=false; this.hint.setVisible(true); this.tx.setText('');
-    if(l.fx) this.sc.onFx(l.fx);
+    if(l.fx) this.sc.onFx(l.fx); if(l.sanity) this.sc.state.addSanity(l.sanity);
     if(this.timer) this.timer.remove();
-    this.timer=this.sc.time.addEvent({delay:24,loop:true,callback:()=>{
-      this.i++; this.tx.setText(this.full.slice(0,this.i)); if(this.i%2===0) this.sc.audio.sfx('blip'); if(this.i>=this.full.length) this.doneTyping(); }});
+    this.timer=this.sc.time.addEvent({delay:24,loop:true,callback:()=>{ this.i++; this.tx.setText(this.full.slice(0,this.i)); if(this.i%2===0) this.sc.audio.sfx('blip'); if(this.i>=this.full.length) this.doneTyping(); }});
   }
   doneTyping(){
     if(this.timer){ this.timer.remove(); this.timer=null; } this.tx.setText(this.full);
@@ -347,7 +398,7 @@ class Dialogue {
   }
   update(){
     const J=Phaser.Input.Keyboard.JustDown, k=this.k;
-    this.tx.x=58+(this.sc.state.phase===3?Phaser.Math.FloatBetween(-1.5,1.5):0);
+    this.tx.x=58+(this.sc.state.phase>=4?Phaser.Math.FloatBetween(-1.5,1.5):0);
     if(this.timer){ if(J(k.E)||J(k.SP)) this.doneTyping(); return; }
     if(this.choosing){ if(J(k.N1)) this.pick(0); else if(J(k.N2)) this.pick(1); return; }
     if(J(k.E)||J(k.SP)) this.next();
@@ -356,28 +407,49 @@ class Dialogue {
 }
 
 /* ============================================================
-   ART  (all drawn in code - swap for real sprite sheets later)
+   ART (drawn in code)
    ============================================================ */
 const tex=(s,key,w,h,fn)=>{ const g=s.make.graphics({add:false}); fn(g); g.generateTexture(key,w,h); g.destroy(); };
-function drawPerson(g,o,dir,f,walk){
+function drawPerson(g,o,dir,f,walk,expression='neutral'){
   const sw=walk?[-3,0,3,0][f]:0, b=12-(walk?f%2:f);
   g.fillStyle(0x000000,0.25).fillEllipse(16,50,22,6); g.fillStyle(o.pants);
   if(dir==='s'){ g.fillRect(12+sw,40,6,10); g.fillRect(16-sw,40,6,10); } else { g.fillRect(10,40,6,10-(sw>0?3:0)); g.fillRect(17,40,6,10-(sw<0?3:0)); }
-  g.fillStyle(0x222222);
-  if(dir==='s'){ g.fillRect(12+sw,48,7,2); g.fillRect(16-sw,48,7,2); } else { g.fillRect(9,48,7,2); g.fillRect(17,48,7,2); }
+  g.fillStyle(0x222222); if(dir==='s'){ g.fillRect(12+sw,48,7,2); g.fillRect(16-sw,48,7,2); } else { g.fillRect(9,48,7,2); g.fillRect(17,48,7,2); }
   if(dir!=='s'){ g.fillStyle(o.shirt).fillRect(4,b+13+sw,5,10).fillRect(24,b+13-sw,5,10); g.fillStyle(o.skin).fillRect(4,b+21+sw,5,3).fillRect(24,b+21-sw,5,3); }
   g.fillStyle(o.shirt).fillRoundedRect(8,b+11,17,18,4); if(o.sash) g.fillStyle(o.sash).fillRect(10,b+16,4,12);
   if(dir==='s'){ g.fillStyle(o.shirt).fillRect(14-sw,b+13,5,10); g.fillStyle(o.skin).fillRect(14-sw,b+21,5,3); }
   g.fillStyle(o.skin).fillCircle(16,b+4,9); g.fillStyle(o.hair); g.beginPath(); g.arc(16,b+4,9,Math.PI,Math.PI*2); g.closePath(); g.fillPath();
   if(dir==='u') g.fillCircle(16,b+4,9); if(dir==='s') g.fillRect(7,b+2,6,8);
   g.fillStyle(0x222222);
-  if(dir==='d'){ g.fillCircle(12.5,b+6,1.6); g.fillCircle(19.5,b+6,1.6); g.fillStyle(0xf28b82).fillRect(14,b+9,4,1.5); }
+  if(dir==='d'){
+    const eyeY=b+6, eyeGap=3.5;
+    if(expression==='scared'||expression==='horrified'){
+      g.fillStyle(0xffffff).fillCircle(12.5,eyeY,2.7).fillCircle(19.5,eyeY,2.7);
+      g.fillStyle(0x111111).fillCircle(12.5,eyeY,1.1).fillCircle(19.5,eyeY,1.1);
+    } else {
+      g.fillCircle(12.5,eyeY,1.6); g.fillCircle(19.5,eyeY,1.6);
+    }
+    if(expression==='happy'){
+      g.lineStyle(1.5,0x7f1d1d); g.beginPath(); g.arc(16,b+8.5,4,0,Math.PI); g.strokePath();
+    } else if(expression==='worried'){
+      g.lineStyle(1.3,0x5b3a1e); g.beginPath(); g.arc(16,b+11,4,Math.PI,Math.PI*2); g.strokePath();
+      g.lineStyle(1.2,0x5b3a1e); g.lineBetween(10,b+3,14,b+2); g.lineBetween(18,b+2,22,b+3);
+    } else if(expression==='scared'||expression==='horrified'){
+      g.fillStyle(0x3f0f0f).fillEllipse(16,b+10,5,4);
+    } else {
+      g.fillStyle(0xf28b82).fillRect(14,b+9,4,1.5);
+    }
+  }
   if(dir==='s') g.fillCircle(21,b+6,1.6);
   if(o.extra) o.extra(g,b,dir);
 }
 const BOB={skin:0xffcf9f,hair:0x5b3a1e,shirt:0xf97316,pants:0x2563eb,extra:(g,b)=>{ g.fillStyle(0xdc2626).fillRect(8,b-4,17,4).fillRect(5,b-1,10,2); }};
-const MAYOR={skin:0xffcf9f,hair:0xbbbbbb,shirt:0x7c3aed,pants:0x374151,sash:0xfacc15,
-  extra:(g,b,d)=>{ g.fillStyle(0x111111).fillRect(6,b-3,20,3).fillRect(9,b-13,14,11); g.fillStyle(0xdc2626).fillRect(9,b-6,14,2); if(d==='d') g.fillStyle(0x888888).fillRect(10,b+9,12,2); }};
+const MAYOR_LOOK={skin:0xffcf9f,hair:0xbbbbbb,shirt:0x7c3aed,pants:0x374151,sash:0xfacc15,extra:(g,b,d)=>{ g.fillStyle(0x111111).fillRect(6,b-3,20,3).fillRect(9,b-13,14,11); g.fillStyle(0xdc2626).fillRect(9,b-6,14,2); if(d==='d') g.fillStyle(0x888888).fillRect(10,b+9,12,2); }};
+const SHADOW={skin:0x050505,hair:0x050505,shirt:0x050505,pants:0x050505};
+function forestTex(s,key,col,n,h0,h1,base,w){ tex(s,key,800,600,g=>{ g.fillStyle(col,1);
+  for(let i=0;i<n;i++){ const x=(i+.5)*800/n+((i*37)%29-14), h=h0+((i*53)%(h1-h0+1));
+    [-800,0,800].forEach(o=>{ const X=x+o; g.fillRect(X-w/2,base-h,w,h+60);
+      for(let k=0;k<4;k++){ const y=base-h+k*h*0.18, hw=w*(2.2+k*.9); g.fillTriangle(X,y-h*0.32,X-hw,y+h*0.12,X+hw,y+h*0.12); } }); } }); }
 
 function makeTextures(s){
   if(s.textures.exists('tiles')) return;
@@ -388,56 +460,67 @@ function makeTextures(s){
     g.fillStyle(0xc98a54).fillRect(3*T,0,T,T); g.lineStyle(2,0xa8703f); for(let i=0;i<4;i++) g.strokeRect(3*T,i*8,T,8);
     g.fillStyle(0x6d3f6a).fillRect(4*T,0,T,T); g.lineStyle(2,0x522d50).strokeRect(4*T+1,1,T-2,T-2);
   });
+  const bobExpressions=['neutral','happy','worried','scared','horrified'];
   ['d','u','s'].forEach(d=>{
-    for(let i=0;i<2;i++) tex(s,`bob_${d}_i${i}`,32,52,g=>drawPerson(g,BOB,d,i,false));
-    for(let i=0;i<4;i++) tex(s,`bob_${d}_w${i}`,32,52,g=>drawPerson(g,BOB,d,i,true));
-    s.anims.create({key:`bob_idle_${d}`,frames:[0,1].map(i=>({key:`bob_${d}_i${i}`})),frameRate:2,repeat:-1});
-    s.anims.create({key:`bob_walk_${d}`,frames:[0,1,2,3].map(i=>({key:`bob_${d}_w${i}`})),frameRate:9,repeat:-1});
+    bobExpressions.forEach(expr=>{
+      for(let i=0;i<2;i++) tex(s,`bob_${expr}_${d}_i${i}`,32,52,g=>drawPerson(g,BOB,d,i,false,expr));
+      for(let i=0;i<4;i++) tex(s,`bob_${expr}_${d}_w${i}`,32,52,g=>drawPerson(g,BOB,d,i,true,expr));
+      s.anims.create({key:`bob_${expr}_idle_${d}`,frames:[0,1].map(i=>({key:`bob_${expr}_${d}_i${i}`})),frameRate:2,repeat:-1});
+      s.anims.create({key:`bob_${expr}_walk_${d}`,frames:[0,1,2,3].map(i=>({key:`bob_${expr}_${d}_w${i}`})),frameRate:9,repeat:-1});
+    });
   });
-  for(let i=0;i<2;i++) tex(s,`mayor_i${i}`,32,52,g=>drawPerson(g,MAYOR,'d',i,false));
+  for(let i=0;i<2;i++) tex(s,`mayor_i${i}`,32,52,g=>drawPerson(g,MAYOR_LOOK,'d',i,false));
   s.anims.create({key:'mayor_idle',frames:[0,1].map(i=>({key:`mayor_i${i}`})),frameRate:2,repeat:-1});
-  tex(s,'tree',48,64,g=>{ g.fillStyle(0x000000,0.2).fillEllipse(24,62,30,7); g.fillStyle(0x7c4a21).fillRect(20,38,8,25);
-    g.fillStyle(0x2f9e44).fillCircle(24,22,20).fillCircle(11,34,13).fillCircle(37,34,13); g.fillStyle(0x51cf66).fillCircle(18,16,8); });
-  tex(s,'sunflower',26,44,g=>{ g.fillStyle(0x2f9e44).fillRect(11,16,3,28).fillEllipse(6,32,10,5).fillEllipse(19,26,10,5);
-    g.fillStyle(0xffd43b); for(let a=0;a<8;a++) g.fillCircle(13+Math.cos(a*Math.PI/4)*8,12+Math.sin(a*Math.PI/4)*8,4.5); g.fillStyle(0x6f4e37).fillCircle(13,12,5.5); });
+  Object.entries(NPCS).forEach(([id,n])=>{
+    for(let i=0;i<2;i++) tex(s,`npc_${id}_i${i}`,32,52,g=>drawPerson(g,n.look,'d',i,false));
+    s.anims.create({key:`npc_${id}_idle`,frames:[0,1].map(i=>({key:`npc_${id}_i${i}`})),frameRate:2,repeat:-1});
+    tex(s,`npc_${id}_shadow`,32,52,g=>{ drawPerson(g,SHADOW,'d',0,false); g.fillStyle(0xffffff).fillRect(10,15,4,7).fillRect(19,15,4,7); });
+  });
+  tex(s,'tree',48,64,g=>{ g.fillStyle(0x000000,0.2).fillEllipse(24,62,30,7); g.fillStyle(0x7c4a21).fillRect(20,38,8,25); g.fillStyle(0x2f9e44).fillCircle(24,22,20).fillCircle(11,34,13).fillCircle(37,34,13); g.fillStyle(0x51cf66).fillCircle(18,16,8); });
+  tex(s,'sunflower',26,44,g=>{ g.fillStyle(0x2f9e44).fillRect(11,16,3,28).fillEllipse(6,32,10,5).fillEllipse(19,26,10,5); g.fillStyle(0xffd43b); for(let a=0;a<8;a++) g.fillCircle(13+Math.cos(a*Math.PI/4)*8,12+Math.sin(a*Math.PI/4)*8,4.5); g.fillStyle(0x6f4e37).fillCircle(13,12,5.5); });
   tex(s,'mailbox',30,46,g=>{ g.fillStyle(0x8b5e3c).fillRect(13,20,4,26); g.fillStyle(0x3b82f6).fillRoundedRect(2,6,26,16,7); g.fillStyle(0xdc2626).fillRect(24,0,3,11).fillRect(24,0,6,4); g.fillStyle(0x1e3a8a).fillRect(6,13,12,3); });
   tex(s,'basket',36,28,g=>{ g.fillStyle(0xdc2626).fillCircle(11,8,6).fillCircle(20,7,6).fillCircle(26,9,5).fillStyle(0xb45309).fillRoundedRect(2,10,32,17,5); g.lineStyle(2,0x8a4a0f).strokeRect(8,12,3,13).strokeRect(20,12,3,13); });
   tex(s,'well',44,56,g=>{ g.fillStyle(0x000000,0.2).fillEllipse(22,54,40,7); g.fillStyle(0x7c4a21).fillRect(6,10,4,26).fillRect(34,10,4,26); g.fillStyle(0xdc2626).fillTriangle(0,12,22,0,44,12); g.fillStyle(0x9ca3af).fillRect(2,34,40,20); g.lineStyle(2,0x6b7280).strokeRect(2,34,40,20); g.fillStyle(0x1e3a8a).fillRect(8,36,28,6); });
-  tex(s,'board',48,60,g=>{ g.fillStyle(0x7c4a21).fillRect(8,30,4,30).fillRect(36,30,4,30); g.fillStyle(0xa16207).fillRect(2,4,44,32); g.lineStyle(3,0x5a3a20).strokeRect(2,4,44,32);
-    g.fillStyle(0xffffff).fillRect(7,9,14,12).fillRect(26,10,15,10).fillRect(12,23,20,9); g.fillStyle(0xdc2626).fillCircle(14,9,2).fillCircle(33,10,2); });
+  tex(s,'board',48,60,g=>{ g.fillStyle(0x7c4a21).fillRect(8,30,4,30).fillRect(36,30,4,30); g.fillStyle(0xa16207).fillRect(2,4,44,32); g.lineStyle(3,0x5a3a20).strokeRect(2,4,44,32); g.fillStyle(0xffffff).fillRect(7,9,14,12).fillRect(26,10,15,10).fillRect(12,23,20,9); g.fillStyle(0xdc2626).fillCircle(14,9,2).fillCircle(33,10,2); });
   tex(s,'pond',100,50,g=>{ g.fillStyle(0x3b82f6).fillEllipse(50,28,96,44); g.fillStyle(0x93c5fd).fillEllipse(38,22,30,10); g.fillStyle(0xfde047).fillCircle(66,26,6).fillCircle(32,32,6); g.fillStyle(0xfb923c).fillRect(71,25,5,3).fillRect(24,31,5,3); });
-  tex(s,'scarecrow',40,64,g=>{ g.fillStyle(0x7c4a21).fillRect(18,22,4,42).fillRect(2,28,36,4); g.fillStyle(0xdc2626).fillRect(12,30,16,16); g.fillStyle(0xe8c98b).fillCircle(20,16,9);
-    g.fillStyle(0x8b5e3c).fillRect(8,8,24,3).fillRect(12,0,16,9); g.fillStyle(0x222222).fillRect(15,14,3,3).fillRect(23,14,3,3).fillRect(16,20,9,2); g.fillStyle(0xfacc15).fillRect(0,30,5,7).fillRect(35,30,5,7); });
+  tex(s,'scarecrow',40,64,g=>{ g.fillStyle(0x7c4a21).fillRect(18,22,4,42).fillRect(2,28,36,4); g.fillStyle(0xdc2626).fillRect(12,30,16,16); g.fillStyle(0xe8c98b).fillCircle(20,16,9); g.fillStyle(0x8b5e3c).fillRect(8,8,24,3).fillRect(12,0,16,9); g.fillStyle(0x222222).fillRect(15,14,3,3).fillRect(23,14,3,3).fillRect(16,20,9,2); g.fillStyle(0xfacc15).fillRect(0,30,5,7).fillRect(35,30,5,7); });
   tex(s,'house',160,128,g=>{ g.fillStyle(0x000000,0.15).fillEllipse(80,124,150,10); g.fillStyle(0xb45309).fillRect(120,6,16,34); g.fillStyle(0xfde68a).fillRect(8,44,144,82).lineStyle(3,0x5a3a20).strokeRect(8,44,144,82);
-    g.fillStyle(0xdc2626).fillTriangle(0,50,80,4,160,50); g.fillStyle(0x7c4a21).fillRect(68,84,24,42); g.fillStyle(0xfacc15).fillCircle(86,106,2);
-    g.fillStyle(0x93c5fd).fillRect(22,64,28,26).fillRect(110,64,28,26); g.lineStyle(2,0xffffff).strokeRect(22,64,28,26).strokeRect(110,64,28,26); });
-  tex(s,'library',160,128,g=>{ g.fillStyle(0x000000,0.15).fillEllipse(80,124,150,10); g.fillStyle(0xe5e7eb).fillRect(8,50,144,76); g.fillStyle(0xcbd5e1).fillTriangle(0,52,80,6,160,52); g.fillStyle(0x1e3a8a).fillRect(58,34,44,12);
-    g.fillStyle(0xf8fafc); [18,44,102,128].forEach(x=>g.fillRect(x,54,14,72)); g.fillStyle(0x5b3a1e).fillRoundedRect(66,80,28,46,8); g.fillStyle(0xfacc15).fillCircle(88,104,2); });
+    g.fillStyle(0xdc2626).fillTriangle(0,50,80,4,160,50); g.fillStyle(0x7c4a21).fillRect(68,84,24,42); g.fillStyle(0xfacc15).fillCircle(86,106,2); g.fillStyle(0x93c5fd).fillRect(22,64,28,26).fillRect(110,64,28,26); g.lineStyle(2,0xffffff).strokeRect(22,64,28,26).strokeRect(110,64,28,26); });
+  tex(s,'library',160,128,g=>{ g.fillStyle(0x000000,0.15).fillEllipse(80,124,150,10); g.fillStyle(0xe5e7eb).fillRect(8,50,144,76); g.fillStyle(0xcbd5e1).fillTriangle(0,52,80,6,160,52); g.fillStyle(0x1e3a8a).fillRect(58,34,44,12); g.fillStyle(0xf8fafc); [18,44,102,128].forEach(x=>g.fillRect(x,54,14,72)); g.fillStyle(0x5b3a1e).fillRoundedRect(66,80,28,46,8); g.fillStyle(0xfacc15).fillCircle(88,104,2); });
   tex(s,'bed',64,48,g=>{ g.fillStyle(0x8b5e3c).fillRect(0,6,64,42); g.fillStyle(0xf8fafc).fillRect(4,10,56,34); g.fillStyle(0x3b82f6).fillRect(22,10,38,34); g.fillStyle(0xffffff).fillRoundedRect(6,14,18,14,5); g.lineStyle(2,0x1e3a8a).strokeRect(22,10,38,34); });
-  tex(s,'shelf',96,56,g=>{ g.fillStyle(0x8b5e3c).fillRect(0,0,96,56); g.fillStyle(0x5a3a20).fillRect(3,3,90,24).fillRect(3,30,90,23);
-    const c=[0xdc2626,0x2563eb,0x16a34a,0xfacc15,0x9333ea,0xf97316]; for(let r=0;r<2;r++) for(let i=0;i<13;i++) g.fillStyle(c[(i+r*2)%6]).fillRect(5+i*7,(r?33:6)+(i%3),5,r?19:21-(i%3)); });
+  tex(s,'shelf',96,56,g=>{ g.fillStyle(0x8b5e3c).fillRect(0,0,96,56); g.fillStyle(0x5a3a20).fillRect(3,3,90,24).fillRect(3,30,90,23); const c=[0xdc2626,0x2563eb,0x16a34a,0xfacc15,0x9333ea,0xf97316]; for(let r=0;r<2;r++) for(let i=0;i<13;i++) g.fillStyle(c[(i+r*2)%6]).fillRect(5+i*7,(r?33:6)+(i%3),5,r?19:21-(i%3)); });
   tex(s,'table',48,36,g=>{ g.fillStyle(0xb07a4a).fillRect(0,6,48,16).fillStyle(0x7c4a21).fillRect(3,22,5,12).fillRect(40,22,5,12); });
+  tex(s,'mat',36,14,g=>{ g.fillStyle(0xb45309).fillRoundedRect(0,0,36,14,4); g.lineStyle(2,0xfacc15).strokeRoundedRect(3,3,30,8,3); });
   tex(s,'fountain',84,56,g=>{ g.fillStyle(0x000000,0.18).fillEllipse(42,50,76,10); g.fillStyle(0x94a3b8).fillEllipse(42,38,76,24); g.fillStyle(0x60a5fa).fillEllipse(42,35,58,16); g.fillStyle(0xe5e7eb).fillRect(38,14,8,22); g.fillStyle(0x93c5fd).fillTriangle(42,2,28,25,56,25); });
   tex(s,'stall',110,62,g=>{ g.fillStyle(0x7c4a21).fillRect(8,22,94,34); g.fillStyle(0xf59e0b).fillTriangle(2,24,55,0,108,24); g.fillStyle(0xfef3c7).fillRect(12,30,86,20); });
-  tex(s,'river',690,54,g=>{ g.fillStyle(0x3b82f6).fillRect(0,4,690,46); g.fillStyle(0x93c5fd); for(let x=10;x<680;x+=65) g.fillEllipse(x,20,38,6); });
+  tex(s,'river',800,56,g=>{ g.fillStyle(0x3b82f6).fillRect(0,4,800,48); g.fillStyle(0x93c5fd); for(let x=10;x<790;x+=65) g.fillEllipse(x,20,38,6); });
   tex(s,'bridge',110,70,g=>{ g.fillStyle(0x7c4a21).fillRect(0,8,110,54); for(let x=5;x<110;x+=18) g.fillStyle(0xa16207).fillRect(x,8,10,54); g.lineStyle(3,0x5a3a20).strokeRect(0,8,110,54); });
   tex(s,'mill',150,120,g=>{ g.fillStyle(0x000000,0.15).fillEllipse(75,116,140,10); g.fillStyle(0x92400e).fillRect(18,45,114,70); g.fillStyle(0x78350f).fillTriangle(5,48,75,5,145,48); g.fillStyle(0xfacc15).fillRect(66,70,18,45); g.fillStyle(0x60a5fa).fillRect(38,62,20,18).fillRect(92,62,20,18); g.lineStyle(4,0x5a3a20).strokeCircle(75,75,28); });
-  tex(s,'mat',36,14,g=>{ g.fillStyle(0xb45309).fillRoundedRect(0,0,36,14,4); g.lineStyle(2,0xfacc15).strokeRoundedRect(3,3,30,8,3); });
-  // --- horror sprites
-  tex(s,'monster',70,96,g=>{ g.fillStyle(0x000000,0.3).fillEllipse(35,93,56,9);
-    g.fillStyle(0x24070d).fillRect(24,34,22,54).fillRect(6,30,11,62).fillRect(53,30,11,62);
+  tex(s,'hive',30,38,g=>{ g.fillStyle(0x7c4a21).fillRect(10,24,4,14).fillRect(20,24,4,14); g.fillStyle(0xfacc15).fillRoundedRect(2,4,26,24,6); g.lineStyle(2,0xb45309).strokeRect(4,12,22,3).strokeRect(4,20,22,3); g.fillStyle(0x111111).fillCircle(15,18,3); });
+  tex(s,'sack',28,28,g=>{ g.fillStyle(0xd6b98c).fillRoundedRect(3,6,22,22,7); g.fillStyle(0xb8935a).fillRect(9,2,10,6); g.fillStyle(0x8b6b3a).fillRect(11,12,6,2); });
+  tex(s,'creek',200,26,g=>{ g.fillStyle(0x60a5fa).fillEllipse(100,14,196,22); g.fillStyle(0xbfdbfe).fillEllipse(70,10,50,5).fillEllipse(140,16,40,4); });
+  tex(s,'hat',30,24,g=>{ g.fillStyle(0xd97706).fillEllipse(15,18,30,8).fillRect(8,6,14,12); g.fillStyle(0x92400e).fillRect(8,13,14,3); });
+  tex(s,'rod',40,54,g=>{ g.fillStyle(0x7c4a21).fillRect(6,4,3,50); g.lineStyle(1,0xffffff).lineBetween(8,6,34,34); g.fillStyle(0xdc2626).fillCircle(34,36,3); g.fillStyle(0x94a3b8).fillRoundedRect(16,38,16,14,3); });
+  tex(s,'gloves',30,24,g=>{ g.fillStyle(0xe7e5e4).fillRoundedRect(2,6,11,15,4).fillRoundedRect(16,6,11,15,4); g.fillStyle(0xf5f5f4).fillRect(2,4,11,5).fillRect(16,4,11,5); });
+  tex(s,'brenda_dead',80,44,g=>{ g.fillStyle(0x5a0a0a,0.85).fillEllipse(44,28,78,28); g.fillStyle(0x7f1d1d,0.9).fillEllipse(62,26,34,20);
+    g.fillStyle(0x92400e).fillRect(2,16,26,8).fillRect(2,25,26,8); g.fillStyle(0x333333).fillRect(0,16,4,8).fillRect(0,25,4,8);
+    g.fillStyle(0xf9a8d4).fillRect(26,12,32,22); g.fillStyle(0xffffff).fillRect(30,14,22,18); g.fillStyle(0xffcf9f).fillRect(36,6,18,6).fillRect(36,34,18,6);
+    g.fillStyle(0x991b1b).fillCircle(60,23,7); g.fillStyle(0x3b0a0a).fillCircle(62,23,4); });
+  // horror
+  tex(s,'monster',70,96,g=>{ g.fillStyle(0x000000,0.3).fillEllipse(35,93,56,9); g.fillStyle(0x24070d).fillRect(24,34,22,54).fillRect(6,30,11,62).fillRect(53,30,11,62);
     g.fillStyle(0xe5e7eb).fillTriangle(6,88,11,88,8,96).fillTriangle(12,88,17,88,14,96).fillTriangle(53,88,58,88,55,96).fillTriangle(59,88,64,88,61,96);
-    g.fillStyle(0x4a0d18).fillCircle(35,26,20); g.fillStyle(0x111111).fillRect(16,8,38,4).fillRect(22,0,26,10);
-    g.fillStyle(0xff1a1a).fillCircle(27,24,5).fillCircle(43,24,5); g.fillStyle(0xffffff).fillCircle(27,24,1.6).fillCircle(43,24,1.6);
-    g.fillStyle(0x000000).fillRect(20,32,30,12); g.fillStyle(0xffffff);
-    for(let i=0;i<7;i++){ g.fillTriangle(21+i*4.4,32,25+i*4.4,32,23+i*4.4,39); g.fillTriangle(21+i*4.4,44,25+i*4.4,44,23+i*4.4,37); } });
+    g.fillStyle(0x4a0d18).fillCircle(35,26,20); g.fillStyle(0x111111).fillRect(16,8,38,4).fillRect(22,0,26,10); g.fillStyle(0xff1a1a).fillCircle(27,24,5).fillCircle(43,24,5); g.fillStyle(0xffffff).fillCircle(27,24,1.6).fillCircle(43,24,1.6);
+    g.fillStyle(0x000000).fillRect(20,32,30,12); g.fillStyle(0xffffff); for(let i=0;i<7;i++){ g.fillTriangle(21+i*4.4,32,25+i*4.4,32,23+i*4.4,39); g.fillTriangle(21+i*4.4,44,25+i*4.4,44,23+i*4.4,37); } });
   tex(s,'shadow',44,80,g=>{ g.fillStyle(0x000000,0.92).fillRect(12,22,20,54).fillCircle(22,14,12).fillRect(4,26,8,40).fillRect(32,26,8,40); g.fillStyle(0xffffff).fillRect(16,11,4,7).fillRect(25,11,4,7); });
+  tex(s,'f_sky',800,600,g=>{ for(let i=0;i<30;i++){ const c=Phaser.Display.Color.Interpolate.ColorWithColor(new Phaser.Display.Color(5,7,13),new Phaser.Display.Color(30,46,58),30,i); g.fillStyle(Phaser.Display.Color.GetColor(c.r,c.g,c.b),1).fillRect(0,i*20,800,20); }
+    for(let i=0;i<45;i++) g.fillStyle(0xffffff,0.55).fillRect((i*97)%800,(i*53)%280,2,2); g.fillStyle(0xd9d7b5,0.12).fillCircle(620,110,85).fillStyle(0xd9d7b5,0.9).fillCircle(620,110,36); });
+  forestTex(s,'f_far',0x0f1a1c,14,160,230,470,12); forestTex(s,'f_mid',0x0a1211,9,230,330,490,18); forestTex(s,'f_near',0x040706,4,470,540,620,34);
   const c=s.textures.createCanvas('vignette',800,600), ctx=c.getContext(), gr=ctx.createRadialGradient(400,300,120,400,300,480);
   gr.addColorStop(0,'rgba(0,0,0,0)'); gr.addColorStop(1,'rgba(0,0,0,1)'); ctx.fillStyle=gr; ctx.fillRect(0,0,800,600); c.refresh();
 }
 
 /* ============================================================
-   TITLE / END
+   TITLE
    ============================================================ */
 class TitleScene extends Phaser.Scene {
   constructor(){ super('Title'); }
@@ -447,259 +530,161 @@ class TitleScene extends Phaser.Scene {
     for(let i=0;i<6;i++){ const t=this.add.image(60+i*140,470,'tree').setOrigin(.5,1).setScale(1.6); this.tweens.add({targets:t,angle:{from:-2,to:2},duration:1600+i*150,yoyo:true,repeat:-1}); }
     const title=this.add.text(400,140,"Bob's Big\nBusy Day",{fontFamily:FONT,fontSize:'72px',color:'#fff',stroke:'#f59e0b',strokeThickness:10,align:'center'}).setOrigin(.5);
     this.tweens.add({targets:title,scale:1.06,duration:900,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
-    const bob=this.add.sprite(400,440,'bob_d_i0').setScale(2.6).setOrigin(.5,1).play('bob_walk_d');
-    this.tweens.add({targets:bob,x:{from:250,to:550},duration:2600,yoyo:true,repeat:-1});
-    const go=this.add.text(400,540,'Click or press ENTER to start',{fontFamily:FONT,fontSize:'24px',color:'#1e3a8a',backgroundColor:'#fde047',padding:{x:14,y:6}}).setOrigin(.5);
-    this.tweens.add({targets:go,alpha:.5,duration:700,yoyo:true,repeat:-1});
+    const bob=this.add.sprite(400,440,'bob_neutral_d_i0').setScale(2.6).setOrigin(.5,1).play('bob_neutral_walk_d'); this.tweens.add({targets:bob,x:{from:250,to:550},duration:2600,yoyo:true,repeat:-1});
+    const go=this.add.text(400,540,'Click or press ENTER to start',{fontFamily:FONT,fontSize:'24px',color:'#1e3a8a',backgroundColor:'#fde047',padding:{x:14,y:6}}).setOrigin(.5); this.tweens.add({targets:go,alpha:.5,duration:700,yoyo:true,repeat:-1});
     const start=()=>{ this.registry.get('audio').start(); this.scene.start('Room',{room:'house',spawn:[7,7.2]}); };
     this.input.once('pointerdown',start); this.input.keyboard.once('keydown-ENTER',start);
   }
 }
-class EscapeCutscene extends Phaser.Scene {
-  constructor(){ super('EscapeCutscene'); }
+
+/* ============================================================
+   CHASE CUTSCENE (death): side-view chase -> stumble -> first-person look back -> jumpscare
+   ============================================================ */
+class ChaseScene extends Phaser.Scene {
+  constructor(){ super('Chase'); }
   create(){
-    this.audio=this.registry.get('audio');
-    this.cameras.main.setBackgroundColor('#050507');
-    this.input.keyboard.removeAllKeys(true);
-    this.index=0; this.finished=false; this.root=this.add.container(0,0).setDepth(1);
-    this.caption=this.add.text(400,535,'',{fontFamily:'Georgia, serif',fontSize:'28px',color:'#f3f3f3',stroke:'#000',strokeThickness:8,align:'center',wordWrap:{width:720}}).setOrigin(.5).setDepth(50);
-    this.sub=this.add.text(400,575,'',{fontFamily:FONT,fontSize:'15px',color:'#aaa'}).setOrigin(.5).setDepth(50);
-    this.showSlide(0);
+    this.au=this.registry.get('audio'); this.run=true; this.cameras.main.setBackgroundColor('#04060a').fadeIn(300);
+    this.layers=[['f_sky',0.03,0],['f_far',0.18,1],['f_mid',0.5,2],['f_near',1.5,8]].map(([k,sp,d])=>({s:this.add.tileSprite(0,0,800,600,k).setOrigin(0).setDepth(d),sp}));
+    this.add.rectangle(0,480,800,120,0x0a110f).setOrigin(0).setDepth(3); this.add.rectangle(0,480,800,4,0x1c2a25).setOrigin(0).setDepth(3);
+    this.bob=this.add.sprite(470,540,'bob_s_i0').setOrigin(.5,.96).setScale(2.7).setDepth(6).play('bob_walk_s'); this.bob.anims.timeScale=1.8;
+    this.tweens.add({targets:this.bob,y:534,duration:110,yoyo:true,repeat:-1});
+    this.mon=this.add.sprite(-160,545,'monster').setOrigin(.5,.96).setScale(2.5).setDepth(5).setTint(0x8a8a8a);
+    this.tweens.add({targets:this.mon,x:170,duration:4000,ease:'Sine.easeIn'}); this.tweens.add({targets:this.mon,scaleY:2.35,duration:130,yoyo:true,repeat:-1});
+    this.fog=this.add.image(0,0,'vignette').setOrigin(0).setDepth(20);
+    this.cap=this.add.text(400,70,'RUN.',{fontFamily:'Georgia, serif',fontSize:'46px',color:'#f4f4f4',stroke:'#000',strokeThickness:8}).setOrigin(.5).setDepth(30);
+    this.tweens.add({targets:this.cap,x:{from:396,to:404},duration:60,yoyo:true,repeat:-1});
+    this.time.addEvent({delay:650,loop:true,callback:()=>this.au&&this.au.sfx('heartbeat')});
+    this.time.delayedCall(4300,()=>this.stumble());
   }
-  clearScene(){ this.root.removeAll(true); }
-  addForest(g,night=1){
-    g.fillStyle(night?0x070a0d:0x101a18,1).fillRect(0,0,800,600);
-    g.fillStyle(night?0x101916:0x183024,1).fillRect(0,330,800,270);
-    // layered forest silhouettes
-    for(let i=0;i<15;i++){
-      const x=-20+i*62+(i%2)*10, h=120+(i%5)*28;
-      g.fillStyle(i%3===0?0x0b120f:0x111b16,1).fillRect(x,330-h,18,h+270);
-      g.fillTriangle(x+9,330-h-75,x-55,330-h+55,x+73,330-h+55);
-      g.fillTriangle(x+9,330-h-25,x-38,330-h+75,x+56,330-h+75);
-    }
-    // ground path
-    g.fillStyle(0x262521,1).fillTriangle(300,600,370,350,430,350,500,600);
-    g.fillStyle(0x34332e,1).fillTriangle(345,600,385,390,415,390,455,600);
-    // moon
-    g.fillStyle(0xd9d7b5,0.8).fillCircle(675,90,34);
-    g.fillStyle(night?0x070a0d:0x101a18,0.8).fillCircle(690,82,30);
+  update(t,dt){ if(this.run) this.layers.forEach(l=>{ l.s.tilePositionX+=l.sp*dt*0.55; }); }
+  stumble(){
+    this.run=false; this.bob.anims.stop(); this.bob.setTexture('bob_s_i0'); this.au.sfx('branch'); this.cameras.main.shake(300,0.02);
+    this.tweens.add({targets:this.bob,angle:14,y:544,duration:200}); this.tweens.killTweensOf(this.mon); this.tweens.killTweensOf(this.cap);
+    this.cap.setText('...SNAP.').setPosition(400,70); this.time.delayedCall(1500,()=>this.firstPerson());
   }
-  bobThirdPerson(x,y,scale=2,run=false,flip=false){
-    const b=this.add.sprite(x,y,'bob_d_i0').setOrigin(.5,.96).setScale(scale).setDepth(20);
-    b.play(run?'bob_walk_d':'bob_idle_d'); b.setFlipX(flip); return b;
-  }
-  figureThirdPerson(x,y,scale=1){
-    const g=this.add.graphics().setDepth(18);
-    g.fillStyle(0x050505,1).fillEllipse(x,y-42*scale,28*scale,50*scale);
-    g.fillRect(x-13*scale,y-18*scale,26*scale,65*scale);
-    g.fillRect(x-24*scale,y-8*scale,10*scale,55*scale).fillRect(x+14*scale,y-8*scale,10*scale,55*scale);
-    g.fillStyle(0x17070a,1).fillEllipse(x,y-45*scale,9*scale,5*scale);
-    return g;
-  }
-  sceneRun(){
-    const g=this.add.graphics(); this.root.add(g); this.addForest(g);
-    // cinematic side/behind view: Bob is visible running away from camera
-    const bob=this.bobThirdPerson(400,510,2.5,true,false); this.root.add(bob);
-    const dust=this.add.graphics().setDepth(19); this.root.add(dust);
-    for(let i=0;i<8;i++) dust.fillStyle(0x77715f,0.18).fillCircle(380+i*6,555-(i%3)*8,4+(i%2)*3);
-    this.tweens.add({targets:bob,x:{from:390,to:410},duration:240,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
-    this.tweens.add({targets:bob,scaleX:{from:2.45,to:2.65},duration:180,yoyo:true,repeat:-1});
-    this.text('RUN.','Bob tears through the woods, never looking back.');
-  }
-  sceneNoise(){
-    const g=this.add.graphics(); this.root.add(g); this.addForest(g);
-    const bob=this.bobThirdPerson(400,500,2.35,false,false); this.root.add(bob);
-    // a branch bends/snaps behind Bob
-    const br=this.add.graphics().setDepth(17); this.root.add(br);
-    const drawBranch=(ang)=>{br.clear(); br.lineStyle(8,0x3b281d,1); br.beginPath(); br.moveTo(585,250); br.lineTo(540,330); br.lineTo(500,300); br.strokePath(); br.setRotation(ang);};
-    drawBranch(0);
-    this.tweens.add({targets:br,angle:{from:-.04,to:.08},duration:180,yoyo:true,repeat:4});
-    this.audio&&this.audio.sfx('branch');
-    this.text('...CRACK.','Bob freezes. Something moved behind him.');
-  }
-  sceneLookBack(){
-    const g=this.add.graphics(); this.root.add(g); this.addForest(g);
-    // Bob turns his body toward the sound; camera remains third-person
-    const bob=this.bobThirdPerson(420,500,2.4,false,true); this.root.add(bob);
-    const glow=this.add.circle(420,415,85,0x6d7c6b,0.08).setDepth(3); this.root.add(glow);
-    this.tweens.add({targets:glow,alpha:0,duration:1200});
-    this.text('Bob looks behind him.','Nothing. Just trees, fog, and the sound of his own breathing.');
-  }
-  sceneTurn(){
-    const g=this.add.graphics(); this.root.add(g); this.addForest(g);
-    const bob=this.bobThirdPerson(420,505,2.4,false,false); this.root.add(bob);
-    this.figureThirdPerson(400,300,0.75);
-    const fog=this.add.rectangle(400,390,520,130,0x9aa59a,0.06).setDepth(10); this.root.add(fog);
-    this.text('He turns back around.','A figure is standing far down the path.');
-    this.audio&&this.audio.sfx('heartbeat');
-  }
-  sceneFirstPerson(){
-    const g=this.add.graphics(); this.root.add(g);
-    g.fillStyle(0x030307,1).fillRect(0,0,800,600);
-    g.fillStyle(0x0b1110,1).fillRect(0,350,800,250);
-    for(let i=0;i<13;i++){
-      const x=i*67, h=170+(i%4)*35;
-      g.fillStyle(0x101714,1).fillRect(x,350-h,15,h+250);
-      g.fillTriangle(x+7,350-h-70,x-58,350-h+55,x+70,350-h+55);
-    }
-    g.fillStyle(0x25241f,1).fillTriangle(265,600,400,395,535,600);
-    // subtle first-person hands at bottom
-    g.fillStyle(0x8b5a3c,1).fillRoundedRect(245,505,72,95,24).fillRoundedRect(483,505,72,95,24);
-    g.fillStyle(0x2b2b2b,1).fillEllipse(281,540,62,38).fillEllipse(519,540,62,38);
-    // distant figure
-    const m=this.add.sprite(400,330,'monster').setScale(.16).setAlpha(.75).setDepth(20); this.root.add(m);
-    this.caption.setY(525);
-    this.text('WOAH... WHAT’S THA...','Bob squints. The figure is getting closer.');
-    this.audio&&this.audio.sfx('heartbeat');
-    this.tweens.add({targets:m,alpha:1,scale:.2,duration:900,yoyo:true,repeat:1});
-  }
-  text(title,body){
-    this.caption.setText(title+'\n'+body).setAlpha(0);
-    this.tweens.add({targets:this.caption,alpha:1,duration:500});
-  }
-  showSlide(i){
-    if(this.finished) return; this.index=i; this.clearScene();
-    const slides=[
-      ['run',5200],['noise',4800],['look',5000],['turn',5200],['fp',3000]
-    ];
-    const s=slides[i]; if(!s) return this.animateFinal();
-    if(s[0]==='run') this.sceneRun();
-    if(s[0]==='noise') this.sceneNoise();
-    if(s[0]==='look') this.sceneLookBack();
-    if(s[0]==='turn') this.sceneTurn();
-    if(s[0]==='fp') this.sceneFirstPerson();
-    this.time.delayedCall(s[1],()=>this.showSlide(i+1));
-  }
-  animateFinal(){
-    this.clearScene(); this.caption.setText('');
-    const g=this.add.graphics().setDepth(2); g.fillStyle(0x020204,1).fillRect(0,0,800,600); g.fillStyle(0x0b100e,1).fillRect(0,360,800,240);
-    for(let i=0;i<11;i++){const x=i*76;g.fillStyle(0x0b110f,1).fillRect(x,220,16,380);g.fillTriangle(x+8,160,x-55,325,x+70,325);}
-    const monster=this.add.sprite(400,330,'monster').setScale(.18).setDepth(10);
-    this.audio&&this.audio.sfx('heartbeat');
-    this.tweens.add({targets:monster,scale:.26,duration:700,ease:'Sine.easeIn'});
-    this.time.delayedCall(1000,()=>{
-      this.audio&&this.audio.sfx('scream');
-      const red=this.add.rectangle(400,300,800,600,0xb00000,.18).setDepth(30);
-      this.tweens.add({targets:red,alpha:.78,duration:70,yoyo:true,repeat:12});
-      this.cameras.main.shake(1000,.055); monster.setAlpha(1);
-      this.tweens.add({targets:monster,scale:9.5,y:310,duration:430,ease:'Cubic.easeIn',onUpdate:()=>this.cameras.main.shake(80,.035),onComplete:()=>this.jumpscare()});
-    });
+  firstPerson(){
+    this.children.removeAll(true); this.cameras.main.setZoom(1);
+    const g=this.add.graphics(); g.fillStyle(0x020306).fillRect(0,0,800,600); g.fillStyle(0x0a100e).fillRect(0,300,800,300); g.fillStyle(0x2c2a24).fillTriangle(400,300,110,600,690,600);
+    for(let i=0;i<14;i++){ const d=i/13, sc=0.05+d*d*1.5, gy=300+d*d*150, h=sc*420, c=Phaser.Display.Color.GetColor(6+(1-d)*16,10+(1-d)*22,10+(1-d)*24);
+      [-1,1].forEach(sd=>{ const x=400+sd*(45+d*d*560); g.fillStyle(c,1).fillRect(x-sc*15,gy-h,sc*30,h);
+        for(let k=0;k<3;k++) g.fillTriangle(x,gy-h-sc*40+k*sc*45,x-sc*(70+k*22),gy-h+sc*(30+k*45),x+sc*(70+k*22),gy-h+sc*(30+k*45)); }); }
+    const fog=this.add.rectangle(400,320,800,180,0x9aa8a0,0.07); this.tweens.add({targets:fog,alpha:0.16,duration:1800,yoyo:true,repeat:-1});
+    this.mon=this.add.sprite(400,305,'monster').setOrigin(.5,.96).setScale(0.04).setAlpha(0.8);
+    this.tweens.add({targets:this.mon,scale:0.55,y:360,alpha:1,duration:4600,ease:'Quad.easeIn'});
+    this.add.image(0,0,'vignette').setOrigin(0).setDepth(20);
+    this.cap=this.add.text(400,60,"Don't look back...",{fontFamily:'Georgia, serif',fontSize:'30px',fontStyle:'italic',color:'#dcdcdc',stroke:'#000',strokeThickness:6}).setOrigin(.5).setDepth(30);
+    this.tweens.add({targets:this.cameras.main,zoom:1.07,duration:4600,ease:'Sine.easeIn'}); this.cameras.main.shake(4600,0.0025);
+    this.time.addEvent({delay:520,loop:true,callback:()=>this.au.sfx('heartbeat')});
+    this.time.delayedCall(4700,()=>this.jumpscare());
   }
   jumpscare(){
-    if(this.finished) return; this.finished=true;
-    this.audio&&this.audio.sfx('scream'); this.cameras.main.flash(140,255,255,255);
-    const red=this.add.rectangle(400,300,800,600,0xa00000,.82).setDepth(40);
-    this.tweens.add({targets:red,alpha:.45,duration:80,yoyo:true,repeat:7});
-    this.add.text(400,300,'YOU SHOULD NOT HAVE LOOKED.',{fontFamily:'Georgia, serif',fontSize:'36px',color:'#ffdddd',stroke:'#300000',strokeThickness:8,align:'center',wordWrap:{width:720}}).setOrigin(.5).setDepth(42);
-    this.time.delayedCall(1900,()=>this.scene.start('End'));
+    this.au.sfx('scream'); this.au.sfx('roar'); this.cameras.main.flash(120,255,255,255); this.cameras.main.setZoom(1);
+    this.tweens.killTweensOf(this.mon); this.tweens.add({targets:this.mon,scale:8.5,y:640,duration:220,ease:'Cubic.easeIn'});
+    const red=this.add.rectangle(400,300,800,600,0xa00000,0.5).setDepth(40); this.tweens.add({targets:red,alpha:0.15,duration:70,yoyo:true,repeat:14});
+    this.cameras.main.shake(1200,0.06);
+    this.time.delayedCall(700,()=>{ this.cap.setText('YOU SHOULD NOT HAVE LOOKED.').setColor('#ff3030').setFontSize(34).setDepth(60).setFontStyle('bold'); });
+    this.time.delayedCall(2300,()=>this.scene.start('End',{good:false}));
   }
 }
+
+/* ============================================================
+   END (good ending on Day 10 / game over with retry)
+   ============================================================ */
 class EndScene extends Phaser.Scene {
   constructor(){ super('End'); }
+  init(d){ this.d=d||{}; }
   create(){
-    this.cameras.main.setBackgroundColor('#000');
-    const lines=[
-      ['Bob went to sleep...',0xdddddd],
-      ['The house was quiet.',0xaaaaaa],
-      ['The town kept moving.',0x777777],
-      ['Nobody came looking.',0x555555],
-      ['Nobody heard him.',0x555555],
-      ['Bob goes to sleep...',0xff4444],
-      ['FOREVER.',0xff1111]
-    ];
-    lines.forEach((entry,i)=>this.time.delayedCall(i*1900,()=>{
-      const t=this.add.text(400,170+i*46,entry[0],{fontFamily:'Georgia, serif',fontSize:i>=5?'31px':'26px',color:'#'+entry[1].toString(16).padStart(6,'0'),stroke:'#000',strokeThickness:6}).setOrigin(.5).setAlpha(0);
-      this.tweens.add({targets:t,alpha:1,duration:900});
-      if(i===5) this.audio=this.registry.get('audio'),this.audio&&this.audio.sfx('heartbeat');
-      if(i===6) this.cameras.main.flash(180,120,0,0);
-    }));
-    this.time.delayedCall(lines.length*1900+1800,()=>{
-      this.add.text(400,550,'Press ENTER to return to the beginning',{fontFamily:FONT,fontSize:'16px',color:'#666'}).setOrigin(.5);
-      this.input.keyboard.once('keydown-ENTER',()=>location.reload());
+    const st=this.registry.get('state'), good=this.d.good; this.cameras.main.setBackgroundColor('#000');
+    const lines=good?[['Bob went to sleep...',0xdddddd],['The house was quiet.',0xaaaaaa],['The town kept moving.',0x777777],['Nobody came looking.',0x555555],['Bob goes to sleep...',0xff4444],['FOREVER.',0xff1111]]
+                    :[["Bob didn't make it.",0xdddddd],['The sunflowers are blooming again.',0x999999],['Good morning, Bob.',0xff3333]];
+    lines.forEach((e,i)=>this.time.delayedCall(i*1700,()=>{
+      const t=this.add.text(400,190+i*50,e[0],{fontFamily:'Georgia, serif',fontSize:'27px',color:'#'+e[1].toString(16).padStart(6,'0'),stroke:'#000',strokeThickness:6}).setOrigin(.5).setAlpha(0); this.tweens.add({targets:t,alpha:1,duration:900});
+      if(i===lines.length-1){ this.cameras.main.flash(180,120,0,0); this.registry.get('audio').sfx('heartbeat'); } }));
+    this.time.delayedCall(lines.length*1700+1200,()=>{
+      this.add.text(400,550,good?'Press ENTER to return to the beginning':`Press ENTER to try Day ${st.day} again`,{fontFamily:FONT,fontSize:'16px',color:'#888'}).setOrigin(.5);
+      this.input.keyboard.once('keydown-ENTER',()=>{ if(good) location.reload(); else { st.sanity=70; st.resetDay(); this.scene.start('Room',{room:'house',spawn:[7,7.2]}); } });
     });
   }
 }
 
 /* ============================================================
-   WORLD MAP UI
+   ROOM SCENE
    ============================================================ */
-class WorldMapUI {
-  constructor(scene,state){
-    this.scene=scene; this.state=state; this.open=false;
-    this.c=scene.add.container(0,0).setScrollFactor(0).setDepth(9900).setVisible(false);
-    this.bg=scene.add.rectangle(400,300,720,500,0x172033,0.97).setStrokeStyle(5,0xfacc15);
-    this.title=scene.add.text(400,55,'🗺️ TOWN MAP',{fontFamily:FONT,fontSize:'30px',fontStyle:'bold',color:'#fde68a'}).setOrigin(.5);
-    this.hint=scene.add.text(400,535,'Click an area to travel  •  M / ESC to close',{fontFamily:FONT,fontSize:'15px',color:'#e5e7eb'}).setOrigin(.5);
-    this.c.add([this.bg,this.title,this.hint]);
-    this.buttons=[];
-    const areas=[
-      ['town','🏘️ Town',400,145],['field','🌻 Sunflower Field',220,235],['market','🛒 Market Square',580,235],
-      ['riverside','🌊 Quiet Riverside',220,355],['orchard','🍎 Old Orchard',580,355],['mill','⚙️ Old Mill',400,455]
-    ];
-    areas.forEach(([id,label,x,y])=>{
-      const r=scene.add.rectangle(x,y,220,62,0xfef3c7,1).setStrokeStyle(3,0xd97706).setInteractive({useHandCursor:true});
-      const t=scene.add.text(x,y,label,{fontFamily:FONT,fontSize:'17px',fontStyle:'bold',color:'#7c2d12',align:'center',wordWrap:{width:200}}).setOrigin(.5);
-      r.on('pointerover',()=>r.setFillStyle(0xfde68a)); r.on('pointerout',()=>r.setFillStyle(0xfef3c7));
-      r.on('pointerdown',()=>this.travel(id)); this.c.add([r,t]); this.buttons.push({id,r,t});
+/* ============================================================
+   MAP (view only - shows where you are and where tasks are; NO teleporting)
+   ============================================================ */
+class MapUI {
+  constructor(sc){ this.sc=sc; this.open=false; this.c=sc.add.container(0,0).setScrollFactor(0).setDepth(9900).setVisible(false); this.dyn=[]; }
+  toggle(force){ this.open=force===undefined?!this.open:force; this.c.setVisible(this.open); if(this.open) this.draw(); }
+  draw(){
+    this.dyn.forEach(o=>o.destroy()); this.dyn=[]; const sc=this.sc, st=sc.state, add=o=>{ this.c.add(o); this.dyn.push(o); return o; }, f={fontFamily:FONT};
+    add(sc.add.rectangle(400,300,740,520,0x172033,0.97).setStrokeStyle(5,0xfacc15));
+    add(sc.add.text(400,48,'🗺️  TOWN MAP',{...f,fontSize:'28px',fontStyle:'bold',color:'#fde68a'}).setOrigin(.5));
+    const N={town:[170,250],house:[75,140],library:[265,140],field:[400,250],orchard:[630,250],market:[170,400],riverside:[400,400],mill:[630,400]};
+    const E=[['town','field'],['field','orchard'],['town','market'],['field','riverside'],['riverside','mill'],['town','house'],['town','library']];
+    const g=add(sc.add.graphics()); g.lineStyle(9,0xf0d58a,1); E.forEach(([a,b])=>g.lineBetween(N[a][0],N[a][1],N[b][0],N[b][1]));
+    const pend={}; st.tasks.forEach(k=>{ if(!st.done.has(k.id)){ const r=TRIG_ROOM[k.trigger]; (pend[r]=pend[r]||[]).push(k.icon); } });
+    Object.entries(N).forEach(([id,[x,y]])=>{
+      const here=id===sc.roomId, small=id==='house'||id==='library';
+      add(sc.add.rectangle(x,y,small?120:156,small?38:60,here?0xfacc15:0xfef3c7).setStrokeStyle(3,0xd97706));
+      add(sc.add.text(x,y-(small||!pend[id]?0:11),(here?'📍 ':'')+MAPNAME[id],{...f,fontSize:small?'13px':'15px',fontStyle:'bold',color:'#7c2d12'}).setOrigin(.5));
+      if(pend[id]) add(sc.add.text(small?x:x,small?y+30:y+14,pend[id].join(' '),{fontSize:'15px'}).setOrigin(.5));
     });
-    const close=scene.add.text(750,55,'✕',{fontFamily:FONT,fontSize:'26px',color:'#fff',backgroundColor:'#7f1d1d',padding:{x:8,y:3}}).setOrigin(.5).setInteractive({useHandCursor:true});
-    close.on('pointerdown',()=>this.toggle(false)); this.c.add(close);
+    add(sc.add.text(400,538,'Icons show tasks left in each place   •   walk through the gates to travel   •   M / ESC / ✕ closes',{...f,fontSize:'13px',color:'#e5e7eb'}).setOrigin(.5));
+    add(sc.add.text(745,50,'✕',{...f,fontSize:'24px',color:'#fff',backgroundColor:'#7f1d1d',padding:{x:8,y:2}}).setOrigin(.5).setInteractive({useHandCursor:true})).on('pointerdown',()=>this.toggle(false));
   }
-  toggle(force){ this.open=force===undefined?!this.open:force; this.c.setVisible(this.open); if(this.open){ this.refresh(); } }
-  refresh(){ this.buttons.forEach(b=>{ const here=b.id===this.scene.roomId; b.r.setFillStyle(here?0xfacc15:0xfef3c7); b.t.setText(`${here?'📍 ':''}${b.t.text.replace(/^📍 /,'')}`); }); }
-  travel(id){
-    if(!this.open||id===this.scene.roomId) return this.toggle(false);
-    const spawns={town:[12,10],field:[2.2,9.9],market:[2,10],riverside:[2,10],orchard:[2,10],mill:[2,10]};
-    this.toggle(false); this.scene.audio.sfx('door'); this.scene.goTo(id,spawns[id]||[12,10]);
-  }
-  update(){}
 }
 
 /* ============================================================
-   3. ROOM SCENE
+   ROOM SCENE
    ============================================================ */
 class RoomScene extends Phaser.Scene {
   constructor(){ super('Room'); }
   init(d){ this.roomId=d.room||'town'; this.spawn=d.spawn||[12,10]; this.state=this.registry.get('state'); this.audio=this.registry.get('audio'); }
+  wall(cx,cy,w,h){ const r=this.add.rectangle(cx,cy,w,h).setVisible(false); this.physics.add.existing(r,true); this.blocks.push(r); }
 
   create(){
     const st=this.state, R=ROOMS[this.roomId], W=R.w*T, H=R.h*T;
     this.ox=Math.max(0,(800-W)/2); this.oy=Math.max(0,(600-H)/2);
     const P=(x,y)=>[this.ox+x*T,this.oy+y*T];
-    this.blocks=[]; this.sunflowers=[]; this.spr={}; this.busy=false; this.acting=false; this.act=null; this.born=this.time.now; this.grace=0; this.hm=null; this.houseWarned=false;
-    this.mayorMonster=st.mayorMonster; this.beatT=0; this.pillFlash=0;
-    this.nextVoice=Phaser.Math.Between(6000,12000);
+    this.blocks=[]; this.sunflowers=[]; this.spr={}; this.busy=false; this.acting=false; this.act=null;
+    this.born=null;   // set on first update: a scene's own clock is stale after a restart, which made the house monster spawn instantly on retry
+    this.hm=null; this.houseWarned=false; this.mayorMonster=st.mayorMonster; this.beatT=0; this.nextVoice=Phaser.Math.Between(6000,12000);
+    this.chase=(this.roomId==='town'&&st.mayorMonster)?{mode:'buffer',t:5000}:{mode:'none',t:0};   // buffer -> 30s run -> zoom
     this.cameras.main.setBackgroundColor(R.bg).fadeIn(400);
 
     const data=[]; for(let y=0;y<R.h;y++){ const row=[]; for(let x=0;x<R.w;x++) row.push(R.tile(x,y)); data.push(row); }
     const map=this.make.tilemap({data,tileWidth:T,tileHeight:T});
     this.layer=map.createLayer(0,map.addTilesetImage('tiles','tiles',T,T,0,0),this.ox,this.oy); this.layer.setCollision([2,4]);
-    this.drawPaths(R);
 
     const place=p=>{
-      const [x,y]=P(p.x,p.y);
-      if(p.k){ const s=this.add.image(x,y,p.k).setOrigin(.5,1).setDepth(y); this.spr[p.k]=s;
+      const [x,y]=P(p.x,p.y); let s=null;
+      if(p.k){ s=this.add.image(x,y,p.k).setOrigin(.5,1).setDepth(p.d!==undefined?p.d:y); this.spr[p.k]=s;
         if(p.sway) this.tweens.add({targets:s,angle:{from:-2.5,to:2.5},duration:Phaser.Math.Between(1300,2300),delay:Math.random()*900,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
         if(p.sf) this.sunflowers.push(s); }
-      if(p.b){ const r=this.add.rectangle(x,y-p.b[1]/2,p.b[0],p.b[1]).setVisible(false); this.physics.add.existing(r,true); this.blocks.push(r); }
-      return [x,y];
+      if(p.b) this.wall(x,y-p.b[1]/2,p.b[0],p.b[1]);
+      return [x,y,s];
     };
     R.props.forEach(place);
+    (R.walls||[]).forEach(([x,y,w,h])=>this.wall(this.ox+(x+w/2)*T,this.oy+(y+h/2)*T,w*T,h*T));
+
     this.triggers=R.triggers.map(d=>{
       const t={...d};
       if(d.npc){ [t.x,t.y]=P(d.x,d.y); t.sprite=this.add.sprite(t.x,t.y,'mayor_i0').setOrigin(.5,.96).play('mayor_idle'); }
-      else [t.x,t.y]=place(d);
-      if(d.icon){ t.iconObj=this.add.text(t.x,t.y-(d.ih||44),d.icon,{fontSize:'22px'}).setOrigin(.5).setDepth(8000);
-        if(!d.npc) this.tweens.add({targets:t.iconObj,y:t.iconObj.y-6,duration:600,yoyo:true,repeat:-1,ease:'Sine.easeInOut'}); }
+      else { const [x,y,s]=place(d); t.x=x; t.y=y; t.sprite=s; if(d.npcId) this.makeNpc(t); }
+      if(d.icon){
+        const sp=t.sprite||(d.over&&this.spr[d.over]), iy=sp?sp.y-sp.displayHeight-14:t.y-(d.ih||40);
+        t.iconObj=this.add.text(t.x,iy,d.icon,{fontSize:'22px'}).setOrigin(.5).setDepth(8000);
+        if(!d.npc) this.tweens.add({targets:t.iconObj,y:iy-6,duration:600,yoyo:true,repeat:-1,ease:'Sine.easeInOut'}); }
       return t;
     });
     this.mayor=this.triggers.find(t=>t.npc);
-    if(this.mayor) this.styleMayor();
+    if(this.mayor){ this.styleMayor(); this.mayor.disabled=this.mayorMonster; }
 
-    // slow-burn set dressing
     if(st.day>=2&&this.sunflowers[0]) this.sunflowers[0].setTint(0x8a8a5a).setScale(1,0.8);
     if(st.day>=4) this.sunflowers.forEach((s,i)=>{ if(i%2) s.setTint(0x9a9a6a); });
-    if(st.day>=6){ if(this.spr.pond) this.spr.pond.setTint(0x7a1010); if(this.spr.scarecrow) this.spr.scarecrow.setTint(0x991b1b); }
+    if(st.day>=7&&this.spr.scarecrow) this.spr.scarecrow.setTint(0x991b1b);
+    if(st.phase>=4){ if(this.spr.pond) this.spr.pond.setTint(0x7a1010); if(this.spr.creek) this.spr.creek.setTint(0x8a1c1c); if(this.spr.river&&st.day>=9) this.spr.river.setTint(0x9a3a3a); }
 
     const [sx,sy]=P(...this.spawn);
     this.player=this.physics.add.sprite(sx,sy,'bob_d_i0').setOrigin(.5,.96).play('bob_idle_d');
@@ -710,281 +695,261 @@ class RoomScene extends Phaser.Scene {
 
     this.cursors=this.input.keyboard.createCursorKeys(); this.wasd=this.input.keyboard.addKeys('W,A,S,D');
     this.keys=this.input.keyboard.addKeys({E:'E',SP:'SPACE',N1:'ONE',N2:'TWO',Q:'Q',T:'T',M:'M',ESC:'ESC'});
-    this.inverted=false;
-    this.time.addEvent({delay:1500,loop:true,callback:()=>{ this.inverted=Math.random()<this.state.params.controlInvertChance; }});
-
-    this.checklist=new ChecklistUI(this,st); this.mapUI=new WorldMapUI(this,st); this.dlg=new Dialogue(this,this.keys);
+    this.checklist=new ChecklistUI(this,st); this.dlg=new Dialogue(this,this.keys); this.mapUI=new MapUI(this);
     this.prompt=this.add.text(0,0,'',{fontSize:'14px',color:'#fff',backgroundColor:'#000a',padding:{x:5,y:3}}).setDepth(8500).setVisible(false).setOrigin(.5);
     const hud=(x,y,txt,sz,ox=1)=>this.add.text(x,y,txt,{fontFamily:FONT,fontSize:sz,color:'#fff',stroke:'#000',strokeThickness:4}).setScrollFactor(0).setDepth(9000).setOrigin(ox,0);
-    hud(788,10,`Day ${st.day}`,'22px'); hud(788,38,R.name,'14px'); hud(788,58,'🧠 SANITY','12px');
-    this.pillText=hud(788,96,'','13px');
-    hud(400,592,'Move: Arrows/WASD   Interact: E   Pill: Q   Tasks: T / click   Map: M / button',' 12px',.5).setOrigin(.5,1);
+    hud(788,10,`Day ${st.day}`,'22px'); hud(788,38,R.name,'14px'); hud(788,58,'🧠 SANITY','12px'); this.pillText=hud(788,96,'','13px');
+    hud(788,128,'🗺 MAP [M]','13px').setInteractive({useHandCursor:true}).on('pointerdown',()=>this.toggleMap());
+    hud(400,592,'Move: Arrows/WASD   Interact: E   Pill: Q   Tasks: T   Map: M',' 12px',.5).setOrigin(.5,1);
+    this.timerText=this.add.text(400,10,'',{fontFamily:FONT,fontSize:'26px',fontStyle:'bold',color:'#ff4444',stroke:'#000',strokeThickness:6}).setOrigin(.5,0).setScrollFactor(0).setDepth(9000);
     this.bars=this.add.graphics().setScrollFactor(0).setDepth(9000); this.actBar=this.add.graphics().setDepth(8600);
-
     this.grade=this.add.rectangle(0,0,800,600,0x8a9a6a).setOrigin(0).setScrollFactor(0).setDepth(8800).setBlendMode(Phaser.BlendModes.MULTIPLY);
     this.vignette=this.add.image(0,0,'vignette').setOrigin(0).setScrollFactor(0).setDepth(8801);
     this.dark=this.add.rectangle(0,0,800,600,0x000000).setOrigin(0).setScrollFactor(0).setDepth(8802);
     this.noise=this.add.rectangle(0,0,800,600,0xffffff).setOrigin(0).setScrollFactor(0).setDepth(8803).setAlpha(0);
-
-    // house monster timer: none on Days 1-2, shadow on 3-5, real monster 6-7
-    this.houseLimit=this.roomId==='house'&&st.day>=3?(st.phase===3?25000:42000):0;
+    this.houseLimit=this.roomId==='house'?[0,42000,34000,25000][st.phase-1]:0;
   }
 
-  drawPaths(R){
-    const g=this.add.graphics().setDepth(6);
-    const px=(x,y,w,h,color=0xf0d58a)=>{g.fillStyle(color,1).fillRect(this.ox+x*T,this.oy+y*T,w*T,h*T);};
-    if(['town','field','market','riverside','orchard','mill'].includes(this.roomId)){
-      px(1,9,23,1.8); // main east-west path
-      if(this.roomId==='town'){ px(10,9,1.2,8); px(10,16.2,3,1.8); } // market path
-      if(this.roomId==='field'){ px(12,9,1.2,8); px(22,9,1.2,8); px(12,16,3,1.8); px(22,16,3,1.8); }
-      if(this.roomId==='riverside'){ px(23,9,2,1.8); px(23,7,1.2,5); }
-      if(this.roomId==='orchard'){ px(12,7,1.2,3); px(19,10,1.2,5); }
-      if(this.roomId==='mill'){ px(15,9,1.2,6); px(15,14,5,1.8); }
-    }
-    g.setAlpha(.72);
+  makeNpc(t){
+    const st=this.state, id=t.npcId, n=NPCS[id], f=t.fate=n.fate(st.day); let s;
+    if(f==='dead'){ s=this.add.image(t.x,t.y,'brenda_dead').setOrigin(.5,.8); if(s.preFX) s.preFX.addBlur(0,1.8,1.8,1.3); }   // blurred, headless body
+    else if(f==='gone') s=this.add.image(t.x,t.y,n.left).setOrigin(.5,1);
+    else if(f==='shadow'){ s=this.add.sprite(t.x,t.y,`npc_${id}_shadow`).setOrigin(.5,.96).setScale(1,1.14); t.disabled=true; }   // just stares
+    else { s=this.add.sprite(t.x,t.y,`npc_${id}_i0`).setOrigin(.5,.96).play(`npc_${id}_idle`);
+      if(f==='uneasy') s.setTint(0xd0d0d0); if(f==='hunted'){ s.setTint(0x9aa0a6); this.tweens.add({targets:s,x:t.x+2,duration:70,yoyo:true,repeat:-1}); } }
+    s.setDepth(t.y); t.sprite=s;
   }
+  styleMayor(){ const s=this.mayor.sprite, d=this.state.day; if(this.mayorMonster) this.makeMonster(); else if(d>=6) s.setScale(0.92,1.2); else if(d>=5) s.setScale(0.96,1.1); else if(d>=3) s.setScale(1,1.04); }
+  makeMonster(){ const s=this.mayor.sprite; s.stop(); s.setTexture('monster').setScale(1).setRotation(0); this.tweens.add({targets:s,scaleY:1.06,duration:500,yoyo:true,repeat:-1}); }
+  onFx(fx){ if(fx==='monster'){ this.state.mayorMonster=this.mayorMonster=true; this.mayor.disabled=true; this.makeMonster(); this.audio.sfx('roar'); this.cameras.main.shake(700,0.02); this.cameras.main.flash(400,255,0,0); } }
 
-  styleMayor(){
-    const s=this.mayor.sprite, d=this.state.day;
-    if(this.mayorMonster) this.makeMonster(); else if(d>=5) s.setScale(0.95,1.12); else if(d>=3) s.setScale(1,1.04);
-  }
-  makeMonster(){ const s=this.mayor.sprite; s.stop(); s.setTexture('monster').setScale(1).setRotation(0);
-    this.tweens.add({targets:s,scaleY:1.06,duration:500,yoyo:true,repeat:-1}); }
-  onFx(fx){ if(fx==='monster'){ this.state.mayorMonster=this.mayorMonster=true; this.makeMonster(); this.audio.sfx('roar'); this.cameras.main.shake(700,0.02); this.cameras.main.flash(400,255,0,0); } }
-
-  /* ---------- helpers ---------- */
   goTo(room,spawn,onMid){
     if(this.busy) return; this.busy=true; this.player.setVelocity(0); this.cameras.main.fadeOut(350,0,0,0);
     this.cameras.main.once('camerafadeoutcomplete',()=>{ if(onMid) onMid(); this.scene.restart({room,spawn}); });
   }
-  flash(msg){ const t=this.add.text(this.player.x,this.player.y-60,msg,{fontSize:'15px',color:'#fff',stroke:'#000',strokeThickness:3}).setOrigin(.5).setDepth(8600);
-    this.tweens.add({targets:t,y:t.y-24,alpha:0,duration:1000,onComplete:()=>t.destroy()}); }
+  toggleMap(){ if(!this.mapUI.open&&(this.dlg.active||this.busy||this.acting||this.chase.mode==='zoom')) return; this.mapUI.toggle(); }
+  flash(msg){ const t=this.add.text(this.player.x,this.player.y-64,msg,{fontSize:'15px',color:'#fff',stroke:'#000',strokeThickness:3,align:'center',wordWrap:{width:300}}).setOrigin(.5,1).setDepth(8600);
+    this.tweens.add({targets:t,y:t.y-24,alpha:0,duration:1800,onComplete:()=>t.destroy()}); }
+  emote(o,e){ if(!o||!o.scene) return; const s=this.fxText(e,o.x,o.y-o.displayHeight-8,'20px'); this.tweens.add({targets:s,y:s.y-16,alpha:0,duration:1100,onComplete:()=>s.destroy()}); }
   voice(txt){
-    const big=this.state.phase===3;
-    const t=this.add.text(400,big?290:490,txt,{fontFamily:'Georgia, serif',fontSize:big?'34px':'22px',fontStyle:'italic',color:big?'#ff2a2a':'#d8d8e8',stroke:'#000',strokeThickness:5,align:'center',wordWrap:{width:700}})
-      .setOrigin(.5).setScrollFactor(0).setDepth(9400).setAlpha(0);
+    const big=this.state.phase>=4;
+    const t=this.add.text(400,big?290:490,txt,{fontFamily:'Georgia, serif',fontSize:big?'34px':'22px',fontStyle:'italic',color:big?'#ff2a2a':'#d8d8e8',stroke:'#000',strokeThickness:5,align:'center',wordWrap:{width:700}}).setOrigin(.5).setScrollFactor(0).setDepth(9400).setAlpha(0);
     this.audio.sfx('whisper'); if(big&&Math.random()<0.4) this.audio.sfx('sting');
     this.tweens.add({targets:t,alpha:big?1:0.85,duration:900,yoyo:true,hold:big?1800:1500,onComplete:()=>t.destroy()});
     if(big) this.tweens.add({targets:t,x:{from:394,to:406},duration:60,yoyo:true,repeat:45});
   }
+  randVoice(){ return Phaser.Utils.Array.GetRandom([[],VOICE_MILD,VOICE_MID,VOICE_SEVERE][this.state.phase-1]); }
   takePill(){
     const st=this.state, now=performance.now();
     if(now<st.pillReadyAt) return this.flash(`Wait ${Math.ceil((st.pillReadyAt-now)/1000)}s`);
     st.pillReadyAt=now+15000; st.addSanity(22); this.audio.sfx('pill'); this.flash('💊 Sanity +22');
   }
-  finish(task){
+  lore(t){ this.flash(LORE[t.id][this.state.phase>=2?1:0]); }
+  finish(task,t){
     if(!this.state.completeTask(task.id)) return;
-    this.audio.sfx('success'); this.flash(['Yay!','Done.','...'][this.state.phase-1]);
-    if(this.state.phase===3&&Math.random()<0.4) this.voice(Phaser.Utils.Array.GetRandom(VOICE_SEVERE));
+    const ph=this.state.phase; this.audio.sfx('success'); if(t&&LORE[t.id]) this.lore(t); else this.flash(['Yay!','Done.','Done...','...'][ph-1]);
+    if(ph>=4&&Math.random()<0.4) this.voice(this.randVoice()); else if(ph===3&&Math.random()<0.2) this.voice(this.randVoice());
+  }
+  die(){ if(this.busy) return; this.busy=true; this.player.setVelocity(0); this.scene.start('Chase'); }
+  escaped(){   // days 8+: leaving town alive while Barnaby hunts = the Barnaby task
+    const st=this.state; if(this.roomId!=='town'||!this.mayorMonster||st.day<8) return;
+    const mt=st.tasks.find(k=>k.trigger==='mayor'&&!st.done.has(k.id));
+    if(mt&&(this.chase.mode==='buffer'||this.chase.mode==='run')){ st.completeTask(mt.id); this.audio.sfx('success'); }
   }
 
   /* ---------- interaction ---------- */
   interact(t){
     const st=this.state, task=st.tasks.find(k=>k.trigger===t.id&&!st.done.has(k.id));
-    if(t.type==='door'){ this.audio.sfx('door'); return this.goTo(t.to,t.spawn); }
+    if(t.type==='door'){ this.escaped(); this.audio.sfx('door'); return this.goTo(t.to,t.spawn); }
     if(t.type==='bed'){
       if(!st.allDone()) return this.flash('Still things to do!');
-      if(st.day>=7){ this.busy=true; this.cameras.main.fadeOut(1200,0,0,0); return this.cameras.main.once('camerafadeoutcomplete',()=>this.scene.start('End')); }
+      if(st.day>=10){ this.busy=true; this.cameras.main.fadeOut(1200,0,0,0); return this.cameras.main.once('camerafadeoutcomplete',()=>this.scene.start('End',{good:true})); }
       return this.goTo('house',[7,7.2],()=>st.nextDay());
     }
     if(t.id==='mayor'){
-      // Talking to Barnaby must NEVER advance the day or clear the checklist.
-      // Snapshot the completed task IDs so dialogue cannot accidentally reset progress.
-      const completedBeforeTalk=new Set(st.done);
-      this.dlg.open(MAYOR_TALK[st.day],()=>{
-        completedBeforeTalk.forEach(id=>st.done.add(id));
-        if(task) this.finish(task);
-        this.grace=this.time.now+3500;
-        this.checklist.refresh();
-      });
+      if(this.mayorMonster) return this.flash('It does not answer. RUN.');
+      let lines; if(!st.talked.mayor){ st.talked.mayor=true; lines=MAYOR_TALK[st.day]||MAYOR_TALK[6]; } else lines=[M(Phaser.Utils.Array.GetRandom(MAYOR_SMALL[Math.min(st.phase,3)]))];
+      this.emote(t.sprite,'💬');
+      this.dlg.open(lines,()=>{ if(task) this.finish(task,t); if(this.mayorMonster&&this.chase.mode==='none') this.chase={mode:'buffer',t:8000}; });   // 8s head start after he transforms
       return;
     }
-    if(t.id==='board'){
-      this.dlg.open([{who:'📋 Notice Board',text:BOARD[st.phase-1]}],()=>{ if(task) this.finish(task); }); return;
+    if(t.npcId){
+      const id=t.npcId, n=NPCS[id], cv=TALK[id][t.fate]; if(!cv) return this.flash('...');
+      this.emote(t.sprite,{ok:'💬',uneasy:'❓',hunted:'⚠️',dead:'💀',gone:'❔'}[t.fate]||'💬');
+      let lines; if(!st.talked[id]){ st.talked[id]=true; lines=cv[st.day%cv.length]; } else lines=[{who:n.name,text:Phaser.Utils.Array.GetRandom((SMALL[id]&&SMALL[id][t.fate])||['...'])}];
+      this.dlg.open(lines,()=>{ if(task) this.finish(task,t); }); return;
     }
-    if(t.type==='explore'){
-      this.startExplore(t);
-      return;
+    if(t.id==='board'){ this.dlg.open([{who:'📋 Notice Board',text:BOARD_TXT[st.phase-1]}],()=>{ if(task) this.finish(task,t); }); return; }
+    if(t.id==='basket'){
+      return this.startAction(t,()=>{ const good=Math.random()<0.25; this.audio.sfx('crunch'); this.audio.sfx(good?'good':'bad');
+        st.addSanity(good?12:-10); this.flash(good?'🍎 Sweet! Sanity +12':'🍎 Rotten... Sanity -10'); if(task) this.finish(task,null); });
     }
-    if(t.id==='basket'){                       // only 1 in 4 apples is good
-      return this.startAction(t,()=>{
-        const good=Math.random()<0.25; this.audio.sfx('crunch'); this.audio.sfx(good?'good':'bad');
-        st.addSanity(good?12:-10); this.flash(good?'🍎 Sweet! Sanity +12':'🍎 Rotten... Sanity -10');
-        if(task) this.finish(task);
-      });
-    }
-    if(task) return this.startAction(t,()=>this.finish(task));
+    if(task) return this.startAction(t,()=>this.finish(task,t));
+    if(LORE[t.id]) return this.lore(t);
     this.flash('Nothing to do here.');
   }
 
-  startExplore(t){
-    if(this.busy||this.acting) return;
-    this.acting=true; this.player.setVelocity(0);
-    const oldScale=this.player.scale;
-    this.tweens.add({targets:this.player,scale:oldScale*1.12,duration:180,yoyo:true,ease:'Sine.easeInOut'});
-    const pulse=this.add.circle(t.x,t.y,10,0xfacc15,0.35).setDepth(8700);
-    this.tweens.add({targets:pulse,scale:4,alpha:0,duration:850,onComplete:()=>pulse.destroy()});
-    const msg={
-      marketFountain:'The fountain is older than the town records.',
-      marketStallA:'Someone left a warm loaf here. Nobody is around.',
-      marketStallB:'The flowers are tied with tiny yellow ribbons.',
-      river:'The river sounds almost like someone humming.',
-      bridge:'The bridge is sturdy. For now.',
-      orchardTrees:'The oldest trees have names carved into them.',
-      orchardPath:'The path disappears behind the trees.',
-      millWheel:'The mill wheel is turning, but there is no wind.',
-      millCreek:'The creek carries little paper boats downstream.'
-    }[t.id]||'You found something interesting.';
-    this.flash(msg);
-    this.audio.sfx('good');
-    const task=this.state.tasks.find(k=>k.trigger===t.id&&!this.state.done.has(k.id));
-    if(task) this.finish(task);
-    this.time.delayedCall(850,()=>{this.acting=false;});
-  }
-
-  /* ---------- task animations: Bob works for a moment, effects play, then the task completes ---------- */
+  /* ---------- custom animation per task ----------
+     Everything animated is recorded and RESTORED afterwards (position + scale, never angle),
+     so objects can no longer get stuck tilted or shaking. */
   fxText(e,x,y,size='22px'){ return this.add.text(x,y,e,{fontSize:size}).setOrigin(.5).setDepth(8700); }
   startAction(t,onDone){
-    const a=ACTIONS[t.id]; if(!a) return onDone();
-    const bloody=this.state.phase===3&&a.kind!=='throw'&&a.kind!=='sweep', e=bloody?'🩸':a.e, R=Phaser.Math.Between, px=this.player.x, py=this.player.y;
+    const a=ACTIONS[t.id]||{e:'✨',ms:800,kind:'rise'}, KD=a.kind, sev=this.state.phase>=4, R=Phaser.Math.Between, px=this.player.x, py=this.player.y, tg=t.sprite;
+    const em=(i=0)=>(sev&&!['throw','stamp','sweep','foot','cast','orbit','glow','spin'].includes(KD))?'🩸':(Array.isArray(a.e)?a.e[i%a.e.length]:a.e);
+    const objs=[], tws=[], undo=[], base=tg?{x:tg.x,y:tg.y,sx:tg.scaleX,sy:tg.scaleY}:null;
+    const fx=(e,x,y,sz)=>{ const o=this.fxText(e,x,y,sz); objs.push(o); return o; }, tw=c=>{ const w=this.tweens.add(c); tws.push(w); return w; };
+    const bump=()=>{ if(tg) tw({targets:tg,scaleX:base.sx*1.14,scaleY:base.sy*0.86,duration:80,yoyo:true,repeat:1}); };
+    const jig=(m=3,rep=5)=>{ if(tg) tw({targets:tg,x:base.x+m,duration:50,yoyo:true,repeat:rep}); };
+    const later=(ms,f)=>this.time.delayedCall(ms,()=>{ if(this.act) f(); });
+    const fall=(e,x,y,dy,ms)=>{ const s=fx(e,x,y); tw({targets:s,y:y+dy,alpha:0,duration:ms}); };
     this.acting=true; this.player.setVelocity(0); this.act={t0:this.time.now,ms:a.ms};
     const dx=t.x-px; if(Math.abs(dx)>10){ this.facing='s'; this.player.setFlipX(dx<0); } else this.facing=t.y<py?'u':'d';
-    const work=this.tweens.add({targets:this.player,scaleY:0.9,scaleX:1.06,angle:{from:-2,to:2},duration:130,yoyo:true,repeat:-1});
-    const junk=[], target=this.spr[t.k]||t.sprite;
-    if(a.kind==='sweep'){ const br=this.fxText('🧹',t.x-16,t.y-22,'26px'); junk.push(br);
-      this.tweens.add({targets:br,angle:{from:-35,to:35},duration:170,yoyo:true,repeat:-1});
-      if(target) this.tweens.add({targets:target,angle:{from:-6,to:6},duration:120,yoyo:true,repeat:-1}); }
-    const spark=()=>{
-      if(a.kind==='throw'){ const s=this.fxText(e,px,py-30,'24px');
-        this.tweens.add({targets:s,x:t.x,duration:a.ms*0.6,ease:'Sine.easeInOut'});
-        this.tweens.add({targets:s,y:t.y-24,angle:360,duration:a.ms*0.6,ease:'Back.easeIn',onComplete:()=>{ s.destroy(); this.tweens.add({targets:target||this.player,angle:{from:-8,to:8},duration:70,yoyo:true,repeat:3}); }}); }
-      else if(a.kind==='rain'){ const s=this.fxText(e,t.x+R(-46,46),t.y-84); this.tweens.add({targets:s,y:s.y+58,alpha:0,duration:520,onComplete:()=>s.destroy()}); }
-      else if(a.kind==='scatter'){ const s=this.fxText(e,px,py-26,'18px'), x=t.x+R(-34,34), y=t.y-R(2,20);
-        this.tweens.add({targets:s,x,y,angle:180,duration:420,onComplete:()=>{ s.destroy();
-          const r=this.add.ellipse(x,y,6,3).setStrokeStyle(2,bloody?0x7a1010:0xffffff).setFillStyle(0xffffff,0).setDepth(8700);
-          this.tweens.add({targets:r,scale:6,alpha:0,duration:600,onComplete:()=>r.destroy()}); }}); }
-      else if(a.kind==='rise'){ const s=this.fxText(e,t.x+R(-16,16),t.y-36); this.tweens.add({targets:s,y:s.y-46,alpha:0,scale:1.5,duration:850,onComplete:()=>s.destroy()}); }
-      else if(a.kind==='sweep'){ const s=this.fxText('✨',t.x+R(-24,24),t.y-R(10,60),'16px'); this.tweens.add({targets:s,y:s.y-20,alpha:0,duration:600,onComplete:()=>s.destroy()}); }
-    };
-    spark(); const ev=this.time.addEvent({delay:a.kind==='throw'?99999:150,loop:true,callback:spark});
+    tw({targets:this.player,scaleY:0.9,scaleX:1.06,duration:130,yoyo:true,repeat:-1});
+    let tick=null;
+    switch(KD){
+      case 'throw': (Array.isArray(a.e)?a.e:[a.e]).forEach((e,j)=>later(j*260,()=>{ const s=fx(e,px,py-30,'24px');
+          tw({targets:s,x:t.x,duration:a.ms*0.5,ease:'Sine.easeInOut'});
+          tw({targets:s,y:t.y-24,angle:360,duration:a.ms*0.5,ease:'Back.easeIn',onComplete:()=>{ s.destroy(); bump(); this.audio.sfx(t.id==='mailbox'?'ding':'blip'); }}); })); break;
+      case 'stamp': { const s=fx(a.e,t.x,t.y-80,'36px'); tw({targets:s,y:t.y-26,scale:{from:1.7,to:1},duration:420,ease:'Bounce.easeOut',onComplete:()=>{
+          const c=fx('✔️',t.x+18,t.y-34,'22px'); tw({targets:c,scale:{from:0.2,to:1.3},duration:200}); jig(2,3); this.audio.sfx('ding'); this.cameras.main.shake(60,0.004); }}); } break;
+      case 'water': { const sb=this.sunflowers.map(s=>[s,s.scaleX,s.scaleY]); undo.push(()=>sb.forEach(([s,x,y])=>s.setScale(x,y)));
+        sb.forEach(([s,x,y],i)=>tw({targets:s,scaleY:y*1.25,scaleX:x*1.08,duration:200,yoyo:true,repeat:3,delay:i*130}));
+        tick=()=>{ const s=Phaser.Utils.Array.GetRandom(this.sunflowers); if(s) fall(em(),s.x+R(-8,8),s.y-70,56,500); }; this.audio.sfx('splash'); } break;
+      case 'scatter': tick=()=>{ const s=fx(em(),px,py-26,'18px'), x=t.x+R(-34,34), y=t.y-R(2,20);
+          tw({targets:s,x,y,angle:180,duration:420,onComplete:()=>{ s.destroy(); const r=this.add.ellipse(x,y,6,3).setStrokeStyle(2,sev?0x7a1010:0xffffff).setFillStyle(0xffffff,0).setDepth(8700); objs.push(r);
+            tw({targets:r,scale:6,alpha:0,duration:600}); if(Math.random()<0.3){ const d=fx('🦆',x,y-4,'16px'); tw({targets:d,y:y-22,duration:250,yoyo:true}); } }}); }; break;
+      case 'cook': { const pan=fx('🍳',t.x,t.y-46,'26px'); tw({targets:pan,x:t.x+3,duration:60,yoyo:true,repeat:-1}); tick=()=>fall(em(),t.x+R(-14,14),t.y-56,-40,800); this.audio.sfx('sizzle'); } break;
+      case 'bucket': { const b=fx('🪣',t.x,t.y-58,'26px'); tw({targets:b,y:t.y-8,duration:420,yoyo:true,repeat:1,hold:150,onYoyo:()=>{ this.audio.sfx('splash'); const s=fx('💦',t.x,t.y-14,'20px'); tw({targets:s,y:t.y-40,alpha:0,duration:500}); }}); } break;
+      case 'cast': { const bx=t.x+R(6,24), by=t.y+R(34,46), g=this.add.graphics().setDepth(8650), fl=this.add.circle(bx,by,4,0xdc2626).setDepth(8700); objs.push(g,fl);
+        tw({targets:{v:0},v:1,duration:a.ms,onUpdate:()=>{ g.clear().lineStyle(1,0xffffff,0.85).lineBetween(px+8,py-34,bx,fl.y); }});
+        tw({targets:fl,y:by+6,duration:150,yoyo:true,repeat:5,delay:500});
+        later(a.ms*0.7,()=>{ const f=fx('🐟',bx,by,'22px'); tw({targets:f,y:by-46,duration:350,yoyo:true,ease:'Sine.easeOut'}); this.audio.sfx('splash'); }); } break;
+      case 'orbit': { const bees=[0,1,2,3,4].map(i=>fx(em(i),t.x,t.y-24,'14px')), c={v:0};
+        tw({targets:c,v:360,duration:900,repeat:-1,onUpdate:()=>bees.forEach((b,i)=>{ const an=(c.v+i*72)*Math.PI/180; b.setPosition(t.x+Math.cos(an)*28,t.y-26+Math.sin(an)*12); })}); jig(2,9); } break;
+      case 'glow': { const gl=this.add.circle(t.x,t.y-10,8,0xffd54a,0.55).setDepth(8650); objs.push(gl); tw({targets:gl,scale:7,alpha:0,duration:600,repeat:1});
+        tick=()=>fall('✨',t.x+R(-18,18),t.y-20,-30,600); this.audio.sfx('good'); } break;
+      case 'sweep': { const br=fx('🧹',t.x-16,t.y-22,'26px'); tw({targets:br,angle:{from:-35,to:35},duration:170,yoyo:true,repeat:-1}); jig(4,-1); tick=()=>fall('💨',t.x+R(-24,24),t.y-R(4,40),-20,600); } break;
+      case 'shake': jig(4,17); tick=()=>fall(em(),t.x+R(-20,20),t.y-60,60,600); break;
+      case 'foot': for(let i=0;i<7;i++) later(i*190,()=>{ const s=fx('👣',t.x-60+i*20,t.y+(i%2?6:-6),'14px'); tw({targets:s,alpha:0,duration:900,delay:200}); }); break;
+      case 'spin': { const gr=fx(a.e,t.x,t.y-70,'42px'); tw({targets:gr,angle:720,duration:a.ms}); this.audio.sfx('creak'); jig(2,9); } break;
+      case 'boat': { const bt=fx(a.e,t.x-40,t.y+6,'22px'); tw({targets:bt,x:t.x+50,duration:a.ms}); tw({targets:bt,y:t.y+2,duration:250,yoyo:true,repeat:5}); tick=()=>fall('💧',t.x+R(-30,30),t.y-30,34,450); } break;
+      case 'lift': if(tg) tw({targets:tg,y:base.y-14,duration:350,yoyo:true,hold:300}); tick=()=>fall('💨',t.x+R(-10,10),t.y-4,-18,500); break;
+      default: tick=()=>fall(em(),t.x+R(-16,16),t.y-36,-46,850);
+    }
+    let ev=null; if(tick){ tick(); ev=this.time.addEvent({delay:150,loop:true,callback:()=>{ if(this.act) tick(); }}); }
     this.time.delayedCall(a.ms,()=>{
-      work.remove(); ev.remove(); junk.forEach(o=>o.destroy()); if(target) target.setAngle(0);
-      this.player.setScale(1); this.player.setAngle(0); this.acting=false; this.act=null; if(this.busy) return;
-      for(let i=0;i<7;i++){ const s=this.fxText(bloody?'🩸':'⭐',t.x,t.y-30,'18px'), an=i/7*Math.PI*2;
-        this.tweens.add({targets:s,x:t.x+Math.cos(an)*36,y:t.y-30+Math.sin(an)*36,alpha:0,duration:650,onComplete:()=>s.destroy()}); }
+      if(ev) ev.remove(); tws.forEach(w=>{ try{ w.stop(); }catch(e){} }); objs.forEach(o=>{ if(o&&o.scene) o.destroy(); }); undo.forEach(f=>f());
+      if(tg&&tg.scene){ tg.x=base.x; tg.y=base.y; tg.setScale(base.sx,base.sy); }
+      this.player.setScale(1); this.acting=false; this.act=null; if(this.busy) return;
+      for(let i=0;i<7;i++){ const s=this.fxText(sev?'🩸':'⭐',t.x,t.y-30,'18px'), an=i/7*Math.PI*2; this.tweens.add({targets:s,x:t.x+Math.cos(an)*36,y:t.y-30+Math.sin(an)*36,alpha:0,duration:650,onComplete:()=>s.destroy()}); }
       onDone();
     });
   }
   drawAct(time){
     const g=this.actBar; g.clear(); if(!this.act) return;
     const f=Math.min(1,(time-this.act.t0)/this.act.ms), x=this.player.x-22, y=this.player.y-64;
-    g.fillStyle(0x000000,0.65).fillRoundedRect(x-2,y-2,48,10,4); g.fillStyle(this.state.phase===3?0xef4444:0xfacc15,1).fillRoundedRect(x,y,44*f,6,3);
+    g.fillStyle(0x000000,0.65).fillRoundedRect(x-2,y-2,48,10,4); g.fillStyle(this.state.phase>=4?0xef4444:0xfacc15,1).fillRoundedRect(x,y,44*f,6,3);
   }
 
-  /* ---------- horror events ---------- */
+  /* ---------- horror ---------- */
   spawnHouseMonster(){
-    const st=this.state, big=st.phase===3, [x,y]=[this.ox+3*T,this.oy+4.5*T];
+    const big=this.state.phase>=4, x=this.ox+3*T, y=this.oy+4.5*T;
     this.hm=this.add.sprite(x,y,big?'monster':'shadow').setOrigin(.5,.96).setDepth(y);
-    this.audio.sfx(big?'roar':'creak'); this.cameras.main.shake(500,0.012);
-    this.voice(big?'IT FOUND YOU.':'Something is in the house.');
+    this.audio.sfx(big?'roar':'creak'); this.cameras.main.shake(500,0.012); this.voice(big?'IT FOUND YOU.':'Something is in the house.');
   }
-  triggerEscapeCutscene(){
-    if(this.busy || this.scene.isActive('EscapeCutscene')) return;
-    this.busy=true; this.player.setVelocity(0); this.scene.start('EscapeCutscene');
-  }
-  forceOut(){
-    this.audio.sfx('sting'); this.cameras.main.flash(300,255,255,255);
-    this.triggerEscapeCutscene();
-  }
+  forceOut(){ this.audio.sfx('sting'); this.cameras.main.flash(300,255,255,255); this.goTo('town',[5.5,6.6],()=>this.state.addSanity([0,-15,-22,-30][this.state.phase-1])); }
 
-  /* ---------- main loop ---------- */
-  applyParams(){
-    const p=this.state.params;
-    this.grade.setAlpha(p.desaturation); this.vignette.setAlpha(Math.min(1,p.desaturation*1.2)); this.dark.setAlpha(p.lightingDarkness*0.6);
-  }
+  /* ---------- loop ---------- */
   drawHud(){
-    const st=this.state, s=st.sanity/100, low=s<0.3, jx=low?Phaser.Math.FloatBetween(-1.5,1.5):0, g=this.bars;
-    g.clear(); g.fillStyle(0x000000,0.65).fillRoundedRect(624,72,168,20,6);
-    g.fillStyle(s>0.5?0x4ade80:s>0.25?0xfacc15:0xef4444,1).fillRoundedRect(628+jx,76,160*s,12,4);
-    const now=performance.now(), rem=st.pillReadyAt-now;
-    this.pillText.setText(rem>0?`💊 ${Math.ceil(rem/1000)}s`:'💊 Ready [Q]').setColor(rem>0?'#f87171':'#86efac');
+    const st=this.state, s=st.sanity/100, jx=s<0.3?Phaser.Math.FloatBetween(-1.5,1.5):0, g=this.bars;
+    g.clear(); g.fillStyle(0x000000,0.65).fillRoundedRect(624,72,168,20,6); g.fillStyle(s>0.5?0x4ade80:s>0.25?0xfacc15:0xef4444,1).fillRoundedRect(628+jx,76,160*s,12,4);
+    const rem=st.pillReadyAt-performance.now(); this.pillText.setText(rem>0?`💊 ${Math.ceil(rem/1000)}s`:'💊 Ready [Q]').setColor(rem>0?'#f87171':'#86efac');
     if(rem>0){ g.fillStyle(0x000000,0.65).fillRoundedRect(690,114,102,8,3); g.fillStyle(0xa78bfa,1).fillRoundedRect(690,114,102*(1-rem/15000),8,3); }
   }
   update(time,delta){
-    const st=this.state, p=st.params, dt=delta/1000;
-    this.applyParams(); this.drawHud(); this.checklist.update(time); this.drawAct(time);
+    if(this.born===null) this.born=time;
+    const st=this.state, p=st.params, dt=delta/1000, JD=Phaser.Input.Keyboard.JustDown;
+    this.grade.setAlpha(p.desaturation); this.vignette.setAlpha(Math.min(1,p.desaturation*1.2)); this.dark.setAlpha(p.lightingDarkness*0.6);
+    this.drawHud(); this.checklist.update(time); this.drawAct(time);
+    if(JD(this.keys.T)&&!this.dlg.active) this.checklist.toggle();
+    if(JD(this.keys.M)) this.toggleMap(); if(JD(this.keys.ESC)&&this.mapUI.open) this.mapUI.toggle(false);
     if(this.dlg.active){ this.player.setVelocity(0); this.animate(0,0); this.dlg.update(); return; }
-    this.mapUI.update();
     if(this.mapUI.open){ this.player.setVelocity(0); this.animate(0,0); return; }
 
-    // sanity drain, low-sanity effects
     if(!this.busy){
       st.sanity=Math.max(0,st.sanity-DRAIN[st.day-1]*dt);
-      if(st.sanity<=0){ this.flash('Bob blacks out...'); this.triggerEscapeCutscene(); }
+      if(st.sanity<=0){ if(st.phase>=4) return this.die(); this.flash('Bob blacks out...'); this.goTo('house',[7,7.2],()=>{ st.sanity=40; }); }
     }
     if(st.sanity<30&&(this.beatT-=delta)<=0){ this.beatT=1000; this.audio.sfx('beat'); if(st.sanity<15) this.cameras.main.shake(120,0.003); }
-    if(Phaser.Input.Keyboard.JustDown(this.keys.Q)&&!this.busy) this.takePill();
-    if(Phaser.Input.Keyboard.JustDown(this.keys.T)) this.checklist.toggle();
-    if(Phaser.Input.Keyboard.JustDown(this.keys.M)) this.mapUI.toggle();
-    if(Phaser.Input.Keyboard.JustDown(this.keys.ESC)&&this.mapUI.open) this.mapUI.toggle(false);
+    if(JD(this.keys.Q)&&!this.busy) this.takePill();
 
-    // voices in Bob's head (Days 3+; much more frequent and vicious after Day 5)
     if(st.phase>=2&&!this.busy&&(this.nextVoice-=delta)<=0){
-      this.voice(Phaser.Utils.Array.GetRandom(st.phase===3?VOICE_SEVERE:VOICE_MILD));
-      this.nextVoice=(st.phase===3?Phaser.Math.Between(7000,14000):Phaser.Math.Between(18000,32000))*(0.6+0.4*st.sanity/100);
+      this.voice(this.randVoice());
+      this.nextVoice=([0,Phaser.Math.Between(18000,32000),Phaser.Math.Between(12000,22000),Phaser.Math.Between(7000,14000)][st.phase-1])*(0.6+0.4*st.sanity/100);
     }
 
-    // movement
+    const zoom=this.chase.mode==='zoom';
     const k=this.cursors, w=this.wasd, sp=140;
     let vx=(k.right.isDown||w.D.isDown?1:0)-(k.left.isDown||w.A.isDown?1:0), vy=(k.down.isDown||w.S.isDown?1:0)-(k.up.isDown||w.W.isDown?1:0);
-    if(this.inverted){ vx=-vx; vy=-vy; } if(this.busy||this.acting){ vx=vy=0; }
+    if(this.busy||this.acting){ vx=vy=0; }
     this.player.setVelocity(vx*sp,vy*sp); if(vx&&vy) this.player.body.velocity.normalize().scale(sp);
     this.animate(vx,vy);
 
-    this.triggers.forEach(t=>{ if(t.iconObj&&t.type==='task') t.iconObj.setVisible(st.tasks.some(k=>k.trigger===t.id&&!st.done.has(k.id))); });
+    this.triggers.forEach(t=>{ if(!t.iconObj) return; const pend=st.tasks.some(k=>k.trigger===t.id&&!st.done.has(k.id)); t.iconObj.setVisible(t.type==='door'||t.type==='bed'||(pend&&!t.disabled)); });
+    this.triggers.forEach(t=>{ if(t.fate==='shadow'){ t.sprite.setFlipX(this.player.x<t.x).setAlpha(0.85+Math.random()*0.15); if(D(this.player.x,this.player.y,t.x,t.y)<240) st.addSanity(-1.5*dt); } });
 
-    // nearest trigger / auto doors
     let near=null,best=46;
-    for(const t of this.triggers){
+    if(!zoom) for(const t of this.triggers){   // during the final lunge there is no escape: doors and objects are locked
       const d=D(this.player.x,this.player.y,t.x,t.y);
-      if(t.auto&&d<30&&time-this.born>700&&!this.busy&&!this.acting) return this.interact(t);
-      if(!t.auto&&d<best){ best=d; near=t; }
+      if(t.auto&&d<36&&time-this.born>700&&!this.busy&&!this.acting) return this.interact(t);
+      if(!t.auto&&!t.disabled&&d<best){ best=d; near=t; }
     }
     this.prompt.setVisible(!!near&&!this.busy&&!this.acting);
-    if(near){ this.prompt.setPosition(near.x,near.y-(near.ih||34)-22).setText('[E] '+near.label);
-      if(Phaser.Input.Keyboard.JustDown(this.keys.E)&&!this.busy&&!this.acting) this.interact(near); }
+    if(near){ this.prompt.setPosition(near.x,near.y+16).setText('[E] '+near.label);
+      if(JD(this.keys.E)&&!this.busy&&!this.acting) this.interact(near); }
 
-    // Mayor: Day 5 creeps toward you; once transformed he hunts you
     if(this.mayor){
-      const m=this.mayor, d=D(m.x,m.y,this.player.x,this.player.y), ang=Phaser.Math.Angle.Between(m.x,m.y,this.player.x,this.player.y);
-      let spd=0; if(this.mayorMonster) spd=st.day===6?60:92; else if(p.npcFollowSpeed>0) spd=Math.min(p.npcFollowSpeed,30);
-      if(!this.busy&&spd&&d>(this.mayorMonster?20:70)){ m.x+=Math.cos(ang)*spd*dt; m.y+=Math.sin(ang)*spd*dt; m.sprite.setPosition(m.x,m.y); }
-      if(this.mayorMonster) m.sprite.setFlipX(this.player.x<m.x); else if(p.desaturation>0.5) m.sprite.rotation=ang+Math.PI/2;
-      m.sprite.setDepth(m.y); if(m.iconObj) m.iconObj.setPosition(m.x,m.y-m.ih+Math.sin(time/250)*4);
-      if(this.mayorMonster&&!this.busy&&d<30&&time>this.grace){
-        this.triggerEscapeCutscene(); }
-    }
-    if(this.spr.scarecrow&&p.desaturation>0.35) this.spr.scarecrow.setAngle(Phaser.Math.Clamp((this.player.x-this.spr.scarecrow.x)/8,-14,14));
+      const m=this.mayor, ch=this.chase, d=D(m.x,m.y,this.player.x,this.player.y), ang=Phaser.Math.Angle.Between(m.x,m.y,this.player.x,this.player.y);
+      if(this.mayorMonster){
+        if(!this.busy&&ch.mode!=='none'){
+          ch.t-=delta;
+          if(ch.mode==='buffer'){ m.sprite.setPosition(m.x+Phaser.Math.FloatBetween(-1.5,1.5),m.y);   // he thrashes in place: your head start
+            if(ch.t<=0){ ch.mode='run'; ch.t=30000; this.audio.sfx('roar'); this.cameras.main.shake(400,0.012); } }
+          else if(ch.mode==='run'&&ch.t<=0){ ch.mode='zoom'; m.sprite.setTint(0xff5555); this.audio.sfx('scream'); this.cameras.main.shake(700,0.03); this.cameras.main.flash(200,255,0,0); }
+          const spd=ch.mode==='zoom'?900:ch.mode==='run'?[0,0,0,0,0,0,0,70,85,100,115][st.day]:0;
+          if(spd&&d>18){ m.x+=Math.cos(ang)*spd*dt; m.y+=Math.sin(ang)*spd*dt; m.sprite.setPosition(m.x,m.y); }
+          if((ch.mode==='run'||ch.mode==='zoom')&&d<30) return this.die();
+        }
+        m.sprite.setFlipX(this.player.x<m.x);
+      } else {
+        const spd=p.npcFollowSpeed>0?Math.min(p.npcFollowSpeed*2,30):0;
+        if(!this.busy&&spd&&d>70){ m.x+=Math.cos(ang)*spd*dt; m.y+=Math.sin(ang)*spd*dt; m.sprite.setPosition(m.x,m.y); }
+        if(p.desaturation>0.5) m.sprite.rotation=ang+Math.PI/2;
+      }
+      m.sprite.setDepth(m.y); if(m.iconObj) m.iconObj.setPosition(m.x,m.y-m.sprite.displayHeight-8+Math.sin(time/250)*4);
+      const txt=!this.mayorMonster?'':ch.mode==='buffer'?`⚠ BARNABY WAKES IN ${Math.ceil(ch.t/1000)}`:ch.mode==='run'?`👹 ${Math.ceil(ch.t/1000)}s TO ESCAPE TOWN`:ch.mode==='zoom'?'💀 RUN!!!':'';
+      this.timerText.setText(txt).setColor(ch.mode==='run'&&ch.t>10000?'#ffffff':'#ff4444');
+    } else this.timerText.setText('');
+    if(this.spr.scarecrow&&p.desaturation>0.35&&!this.acting) this.spr.scarecrow.setAngle(Phaser.Math.Clamp((this.player.x-this.spr.scarecrow.x)/8,-14,14));
 
-    // house monster: spawns if you linger, forces you out
     if(this.houseLimit&&!this.hm){
       if(!this.houseWarned&&time-this.born>this.houseLimit*0.7){ this.houseWarned=true; this.audio.sfx('creak'); this.voice("You've been here too long."); }
       if(time-this.born>this.houseLimit) this.spawnHouseMonster();
     }
     if(this.hm&&!this.busy){
-      const h=this.hm, a=Phaser.Math.Angle.Between(h.x,h.y,this.player.x,this.player.y), s=(st.phase===3?105:70)*dt;
+      const h=this.hm, a=Phaser.Math.Angle.Between(h.x,h.y,this.player.x,this.player.y), s=(st.phase>=4?105:st.phase===3?88:70)*dt;
       h.x+=Math.cos(a)*s; h.y+=Math.sin(a)*s; h.setDepth(h.y).setFlipX(this.player.x<h.x);
       if(D(h.x,h.y,this.player.x,this.player.y)<28) this.forceOut();
     }
-
-    // visual noise
-    this.noise.setAlpha(p.phase===3?Phaser.Math.FloatBetween(0,0.06):0);
+    this.noise.setAlpha(p.phase>=4?Phaser.Math.FloatBetween(0,0.06):0);
     if(p.phase>=2) this.dark.setAlpha(p.lightingDarkness*0.6*(Math.random()<0.02?1.5:1));
   }
   animate(vx,vy){
     if(vx||vy){ this.facing=Math.abs(vx)>=Math.abs(vy)?'s':(vy>0?'d':'u'); if(vx) this.player.setFlipX(vx<0); }
     if(this.facing!=='s') this.player.setFlipX(false);
-    const key=`bob_${vx||vy?'walk':'idle'}_${this.facing}`;
+    const st=this.state;
+    const expression=st.phase>=4?'horrified':st.sanity<25?'scared':st.phase>=3?'worried':st.day<=2?'happy':'neutral';
+    const key=`bob_${expression}_${vx||vy?'walk':'idle'}_${this.facing}`;
     if(this.player.anims.currentAnim?.key!==key) this.player.play(key);
     this.player.setDepth(this.player.y);
   }
@@ -993,18 +958,14 @@ class RoomScene extends Phaser.Scene {
 /* ============================================================ BOOT */
 const state=new CorruptionManager();
 const game=new Phaser.Game({
-  type:Phaser.AUTO,width:800,height:600,backgroundColor:'#87ceeb',physics:{default:'arcade'},scene:[TitleScene,RoomScene,EscapeCutscene,EndScene],
+  type:Phaser.AUTO,width:800,height:600,backgroundColor:'#87ceeb',physics:{default:'arcade'},scene:[TitleScene,RoomScene,ChaseScene,EndScene],
   callbacks:{preBoot:g=>{ g.registry.set('state',state); g.registry.set('audio',new Sound(state)); }},
 });
-// Debug: hold SHIFT + 1-7 to jump to a day (plain 1/2 are reserved for dialogue choices)
+// Debug: SHIFT + 1..9 jumps to that day, SHIFT + 0 jumps to Day 10 (plain 1/2 are dialogue choices)
 window.addEventListener('keydown',e=>{
-  const m=/^Digit([1-7])$/.exec(e.code);
+  const m=/^Digit([0-9])$/.exec(e.code);
   if(m&&e.shiftKey&&game.scene.isActive('Room')){
-    state.day=+m[1]; state.done.clear(); state.sanity=100; state.mayorMonster=state.day>=7;
-    game.scene.getScene('Room').scene.restart({room:'town',spawn:[12,10]});
-  }
-  if((e.key==='-'||e.code==='Minus')&&game.scene.isActive('Room')){
-    state.day=10; state.done.clear(); state.sanity=100; state.mayorMonster=true;
+    state.day=+m[1]||10; state.sanity=100; state.resetDay();
     game.scene.getScene('Room').scene.restart({room:'town',spawn:[12,10]});
   }
 });
